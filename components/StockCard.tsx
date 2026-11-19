@@ -212,7 +212,7 @@ export default function StockCard({
         </div>
       </div>
 
-      {/* Indikator Checklist Mode D */}
+      {/* Indikator Checklist Mode D (Skor murni dari 5 item ini) */}
       <div className="flex flex-wrap gap-1.5 text-[11px]">
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
@@ -230,7 +230,7 @@ export default function StockCard({
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.supportOk ? '✓' : '✕'} Dekat Support &lt;4%
+          {stock.checks.supportOk ? '✓' : '✕'} Dekat Support ≤4%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
@@ -261,28 +261,14 @@ export default function StockCard({
         </span>
       </div>
 
-      {/* Section Baru: Berita & Isu Terbaru */}
+      {/* Section Berita & Isu Terbaru (Terpisah dari Skor Utama) */}
       <div className="bg-[#121212] border border-[#252525] rounded-xl p-3 space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
-            <Newspaper className="w-3.5 h-3.5 text-[#00C853]" />
-            <span>Berita &amp; Isu Terbaru</span>
-          </div>
-          {stock.newsScoreDelta !== 0 && (
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                stock.newsScoreDelta > 0
-                  ? 'bg-[#00C853]/15 text-[#00C853]'
-                  : 'bg-[#FF3B30]/15 text-[#FF3B30]'
-              }`}
-            >
-              Skor {stock.newsScoreDelta > 0 ? '+' : ''}
-              {stock.newsScoreDelta}
-            </span>
-          )}
+        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
+          <Newspaper className="w-3.5 h-3.5 text-[#00C853]" />
+          <span>Berita &amp; Isu Terbaru</span>
         </div>
 
-        {/* Peringatan Negatif / Katalis Positif 24 jam */}
+        {/* Peringatan Negatif / Info Katalis Positif 24 Jam (Terpisah dari Skor) */}
         {news?.hasNegative24h && (
           <div className="flex items-center gap-2 bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-lg px-2.5 py-2 text-xs font-bold">
             <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -341,7 +327,7 @@ export default function StockCard({
           <p className="text-xs text-zinc-400">Tidak ada berita terbaru 24 jam</p>
         )}
 
-        {/* 2 Kolom Ringkasan: Isu Internal & Isu Eksternal */}
+        {/* 1 Baris Isu Internal & 1 Baris Isu Eksternal */}
         <div className="pt-2 border-t border-[#222222] space-y-1.5 text-[11px]">
           <div className="flex items-start gap-1.5 text-zinc-300">
             <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
@@ -353,8 +339,9 @@ export default function StockCard({
           <div className="flex items-start gap-1.5 text-zinc-300">
             <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
             <p className="line-clamp-1">
+              <span className="text-zinc-400 font-semibold">Isu Eksternal: </span>
               {news?.externalSummary ||
-                'Eksternal: Pantau pergerakan IHSG & Rupiah hari ini'}
+                'Pantau pergerakan BI Rate, IHSG & Rupiah hari ini'}
             </p>
           </div>
         </div>
