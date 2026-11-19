@@ -21,7 +21,16 @@ export interface ModeDScoreInput {
   isGreenCandle: boolean; // Close hari ini > Open hari ini
 }
 
+export interface ModeDScorePoints {
+  drop: number;
+  support: number;
+  rsi: number;
+  volume: number;
+  candle: number;
+}
+
 export interface ModeDScoreResult {
+  points: ModeDScorePoints;
   checks: {
     dropOk: boolean;
     supportOk: boolean;
@@ -36,21 +45,30 @@ export interface ModeDScoreResult {
 
 /**
  * FUNGSI TUNGGAL PERHITUNGAN SKOR, CHECKLIST, DAN LABEL MODE D
- * Semua card wajib memakai hasil fungsi ini agar 100% konsisten.
+ * Rumus final (Max 100):
+ * - Drop > 8%          => 20
+ * - Jarak Support 0-4% => 30
+ * - RSI 28 - 48        => 15
+ * - Vol > 1.2x         => 25
+ * - Candle Hijau       => 10
  */
 export function calculateScore(input: ModeDScoreInput): ModeDScoreResult {
-  const dropOk = input.dropPercent > 8;
-  const supportOk = input.distToSupport >= 0 && input.distToSupport <= 4;
-  const rsiOk = input.rsi >= 28 && input.rsi <= 48;
-  const volumeOk = input.volumeRatio > 1.2;
-  const greenCandle = Boolean(input.isGreenCandle);
+  const dropVal = Number(input.dropPercent);
+  const supportVal = Number(input.distToSupport);
+  const rsiVal = Number(input.rsi);
+  const volVal = Number(input.volumeRatio);
+  const isGreen = Boolean(input.isGreenCandle);
+
+  const dropPoints = Number.isFinite(dropVal) && dropVal > 8 ? 20 : 0;
+  const supportPoints =
+    Number.isFinite(supportVal) && supportVal >= 0 && supportVal <= 4 ? 30 : 0;
+  const rsiPoints =
+    Number.isFinite(rsiVal) && rsiVal >= 28 && rsiVal <= 48 ? 15 : 0;
+  const volumePoints = Number.isFinite(volVal) && volVal > 1.2 ? 25 : 0;
+  const candlePoints = isGreen ? 10 : 0;
 
   const score =
-    (dropOk ? 20 : 0) +
-    (supportOk ? 30 : 0) +
-    (rsiOk ? 15 : 0) +
-    (volumeOk ? 25 : 0) +
-    (greenCandle ? 10 : 0);
+    dropPoints + supportPoints + rsiPoints + volumePoints + candlePoints;
 
   let label: ReboundLabel = 'SKIP';
   if (score >= 60) {
@@ -59,7 +77,20 @@ export function calculateScore(input: ModeDScoreInput): ModeDScoreResult {
     label = 'TUNGGU';
   }
 
+  const dropOk = dropPoints > 0;
+  const supportOk = supportPoints > 0;
+  const rsiOk = rsiPoints > 0;
+  const volumeOk = volumePoints > 0;
+  const greenCandle = candlePoints > 0;
+
   return {
+    points: {
+      drop: dropPoints,
+      support: supportPoints,
+      rsi: rsiPoints,
+      volume: volumePoints,
+      candle: candlePoints,
+    },
     checks: {
       dropOk,
       supportOk,
@@ -74,8 +105,24 @@ export function calculateScore(input: ModeDScoreInput): ModeDScoreResult {
 }
 
 /**
+ * Format baris validasi console:
+ * TICKER - Drop:X Dekat:X RSI:X Vol:X Candle:X = Skor:Y
+ */
+export function formatScoreAuditLog(stock: ScreenedStock): string {
+  const { points, score } = calculateScore({
+    dropPercent: Number((-stock.dropFromHigh20).toFixed(1)),
+    distToSupport: stock.distToSupport,
+    rsi: stock.rsi,
+    volumeRatio: stock.volumeRatio,
+    isGreenCandle: stock.isGreenCandle,
+  });
+
+  return `${stock.ticker} - Drop:${points.drop} Dekat:${points.support} RSI:${points.rsi} Vol:${points.volume} Candle:${points.candle} = Skor:${score}`;
+}
+
+/**
  * Hitung RSI (14) dari data close 14 hari terakhir (15 data close = 14 perubahan harian).
- * Jika data close kurang dari 15 titik, tetap hitung dari data yang ada dan tandai isApprox = true.
+ * Jika data close kurang dari 15 titik, hitung dari data yang ada & tandai isApprox = true.
  */
 export function calculateRSI14(
   closes: number[],
@@ -188,12 +235,12 @@ export function analyzeStockModeD(
   const { support: rawSupport, tests: supportTests } = findSupport20(candles);
   const support = rawSupport > 0 ? rawSupport : Math.round(price * 0.95);
 
-  // Drop = (High 20H - Harga) / High 20H * 100% (nilai sama untuk UI & checklist)
+  // Drop = (High 20H - Harga) / High 20H * 100%
   const dropPercent =
     high20 > 0 ? Number((((high20 - price) / high20) * 100).toFixed(1)) : 0;
   const dropFromHigh20 = dropPercent === 0 ? 0 : Number((-dropPercent).toFixed(1));
 
-  // Dekat Support = (Harga - Support) / Support * 100% (nilai sama untuk UI & checklist)
+  // Dekat Support = (Harga - Support) / Support * 100%
   const distToSupport =
     support > 0 ? Number((((price - support) / support) * 100).toFixed(1)) : 0;
 
@@ -203,7 +250,7 @@ export function analyzeStockModeD(
       ? Number((((resistance - price) / price) * 100).toFixed(1))
       : 0;
 
-  // RSI (14) dari data close
+  // RSI (14) dari data close 14 hari terakhir
   const closes14 = candles.slice(-15).map((c) => c.close);
   const { rsi, isApprox: isRsiApprox } = calculateRSI14(closes14, 14);
 
@@ -216,7 +263,7 @@ export function analyzeStockModeD(
   const volumeRatio =
     avgVolume20 > 0 ? Number((volumeToday / avgVolume20).toFixed(2)) : 0;
 
-  // Candle Hijau = Close hari ini > Open hari ini
+  // Candle Hijau: Close hari ini > Open hari ini
   const isGreenCandle = lastCandle ? lastCandle.close > lastCandle.open : false;
 
   // Hitung skor, checklist, & label dari 1 fungsi tunggal calculateScore()
