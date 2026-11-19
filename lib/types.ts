@@ -40,6 +40,15 @@ export interface TickerNewsBundle {
   hasPositive24h: boolean;
 }
 
+export interface ModeDChecks {
+  isDrop: boolean;
+  isDekat: boolean;
+  isRSI: boolean;
+  isVol: boolean;
+  isCandle: boolean;
+  allModeD: boolean;
+}
+
 export interface ScreenedStock {
   ticker: string;
   name: string;
@@ -61,17 +70,11 @@ export interface ScreenedStock {
   volumeRatio: number;
   isGreenCandle: boolean;
   score: number;
+  scoreBreakdown: string;
   label: ReboundLabel;
   lotAffordable: number;
   estimatedCost: number;
-  checks: {
-    dropOk: boolean;
-    supportOk: boolean;
-    rsiOk: boolean;
-    volumeOk: boolean;
-    greenCandle: boolean;
-    allModeD: boolean;
-  };
+  checks: ModeDChecks;
 }
 
 export type PriceFilterKey =
