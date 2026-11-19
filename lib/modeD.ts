@@ -1,16 +1,21 @@
-import { isLq45Ticker, isSyariahTicker } from '@/data/syariah-list';
-import {
-  Candle,
-  ReboundLabel,
-  ScreenedStock,
-  StockRawData,
-  TickerNewsBundle,
-} from './types';
+import { isSyariahTicker } from '@/data/syariah-list';
+import { Candle, ReboundLabel, ScreenedStock, StockRawData } from './types';
+
+const LQ45_SET = new Set([
+  'BBCA', 'BBRI', 'BMRI', 'BBNI', 'BRIS',
+  'AMRT', 'ICBP', 'INDF', 'UNVR', 'ASII',
+  'TLKM', 'EXCL', 'ISAT', 'TOWR', 'MAPI',
+  'INKP', 'MDKA', 'ANTM', 'INCO', 'PTBA',
+  'ADRO', 'ITMG', 'GOTO', 'BUKA', 'ACES',
+  'SRTG', 'KLBF', 'SIDO', 'CPIN', 'JPFA',
+  'SMGR', 'INTP', 'CTRA', 'SMRA', 'BSDE',
+  'PWON', 'JSMR', 'PGEO', 'MBMA', 'ARTO',
+  'BRPT', 'ESSA', 'TPIA', 'BRMS', 'BUMI',
+]);
 
 /**
  * Hitung RSI (14) dari data close 14 hari terakhir (15 data close = 14 perubahan harian).
- * Jika data close dari Yahoo Finance kurang dari 15 titik (< 14 hari perubahan),
- * tetap hitung dari data yang ada dan tandai isApprox = true (tampil "~32.1").
+ * Jika data close kurang dari 15 titik, tetap hitung dari data yang ada dan tandai isApprox = true.
  */
 export function calculateRSI14(
   closes: number[],
@@ -94,13 +99,14 @@ export function findSupport20(candles: Candle[]): {
 }
 
 /**
- * Analisa lengkap satu saham menggunakan aturan Mode D Screener + sentimen berita (opsional)
+ * Analisa lengkap satu saham menggunakan aturan Mode D Screener.
+ * Skor murni dari 5 checklist teknikal (max 100), terpisah dari sentimen berita.
  */
 export function analyzeStockModeD(
   raw: StockRawData,
-  modalUser: number,
-  newsBundle?: TickerNewsBundle
+  modalUser: number
 ): ScreenedStock {
+  const cleanTicker = raw.ticker.replace(/\.JK$/i, '').trim().toUpperCase();
   const candles = raw.candles || [];
   const lastCandle = candles[candles.length - 1];
   const prevCandle =
@@ -130,15 +136,18 @@ export function analyzeStockModeD(
   const dropFromHigh20 =
     high20 > 0 ? Number((((price - high20) / high20) * 100).toFixed(1)) : 0;
 
-  // Jarak harga ke Support & Upside ke Resistance (High 5H) (%)
+  // SINGLE SOURCE OF TRUTH: JarakKeSupport = (HargaSaatIni - Support) / Support * 100%
+  // Nilai yang sama dipakai untuk tampilan UI dan evaluasi checklist Dekat Support
   const distToSupport =
     support > 0 ? Number((((price - support) / support) * 100).toFixed(1)) : 0;
+
+  // Upside ke Resistance (High 5H) (%)
   const distToResistance =
     price > 0
       ? Number((((resistance - price) / price) * 100).toFixed(1))
       : 0;
 
-  // Hitung RSI (14) dari data close 14 hari terakhir (fallback data yang tersedia -> "~")
+  // Hitung RSI (14) dari data close 14 hari terakhir
   const closes14 = candles.slice(-15).map((c) => c.close);
   const { rsi, isApprox: isRsiApprox } = calculateRSI14(closes14, 14);
 
@@ -154,27 +163,22 @@ export function analyzeStockModeD(
   // Candle hijau terakhir (close > open)
   const isGreenCandle = lastCandle ? lastCandle.close > lastCandle.open : false;
 
-  // Checklist syarat Mode D
+  // 5 Checklist Mode D (menggunakan nilai eksak yang ditampilkan di UI)
   const dropOk = dropFromHigh20 < -8;
-  const supportOk = distToSupport >= 0 && distToSupport < 4;
+  const supportOk = distToSupport >= 0 && distToSupport <= 4;
   const rsiOk = rsi >= 28 && rsi <= 48;
   const volumeOk = volumeRatio > 1.2;
-  const allModeD = dropOk && supportOk && rsiOk && volumeOk;
+  const allModeD = dropOk && supportOk && rsiOk && volumeOk && isGreenCandle;
 
-  // Skor teknikal (0 - 100):
-  // Drop >8% (+20) + Dekat Support <4% (+30) + Vol >1.2x (+25) + Candle Hijau (+10) + RSI 28-48 (+15)
-  const baseScore =
+  // Rumus Skor Rebound persis sesuai 5 checklist (Total max 100, tanpa modifikasi berita)
+  const score =
     (dropOk ? 20 : 0) +
     (supportOk ? 30 : 0) +
+    (rsiOk ? 15 : 0) +
     (volumeOk ? 25 : 0) +
-    (isGreenCandle ? 10 : 0) +
-    (rsiOk ? 15 : 0);
+    (isGreenCandle ? 10 : 0);
 
-  // Pengaruh berita 24 jam terakhir (-15 negatif, +10 positif), clamp 0 - 100
-  const newsScoreDelta = newsBundle?.scoreDelta ?? 0;
-  const score = Math.max(0, Math.min(100, baseScore + newsScoreDelta));
-
-  // Label otomatis: < 60 tidak boleh POTENSI REBOUND
+  // Label berdasarkan skor murni: >= 60 POTENSI REBOUND, 40-59 TUNGGU, < 40 SKIP
   let label: ReboundLabel = 'SKIP';
   if (score >= 60) {
     label = 'POTENSI REBOUND';
@@ -189,10 +193,10 @@ export function analyzeStockModeD(
   const estimatedCost = lotAffordable * costPerLot;
 
   return {
-    ticker: raw.ticker,
+    ticker: cleanTicker,
     name: raw.name,
-    isSyariah: isSyariahTicker(raw.ticker),
-    isLq45: isLq45Ticker(raw.ticker),
+    isSyariah: isSyariahTicker(cleanTicker),
+    isLq45: LQ45_SET.has(cleanTicker),
     price,
     prevClose,
     changePercent,
@@ -208,8 +212,6 @@ export function analyzeStockModeD(
     avgVolume20: Math.round(avgVolume20),
     volumeRatio,
     isGreenCandle,
-    baseScore,
-    newsScoreDelta,
     score,
     label,
     lotAffordable,
