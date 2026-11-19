@@ -38,7 +38,6 @@ export interface TickerNewsBundle {
   externalSummary: string | null;
   hasNegative24h: boolean;
   hasPositive24h: boolean;
-  scoreDelta: number;
 }
 
 export interface ScreenedStock {
@@ -61,8 +60,6 @@ export interface ScreenedStock {
   avgVolume20: number;
   volumeRatio: number;
   isGreenCandle: boolean;
-  baseScore: number;
-  newsScoreDelta: number;
   score: number;
   label: ReboundLabel;
   lotAffordable: number;
