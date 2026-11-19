@@ -30,6 +30,29 @@ export function formatDateIndo(isoOrDate: string): string {
   }
 }
 
+export function formatRelativeTimeIndo(isoOrDate: string): string {
+  try {
+    const t = new Date(isoOrDate).getTime();
+    if (Number.isNaN(t)) return 'baru saja';
+    const diffMs = Date.now() - t;
+    if (diffMs < 60_000) return 'baru saja';
+
+    const mins = Math.floor(diffMs / 60_000);
+    if (mins < 60) return `${mins} menit lalu`;
+
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} jam lalu`;
+
+    const days = Math.floor(hours / 24);
+    if (days === 1) return '1 hari lalu';
+    if (days < 7) return `${days} hari lalu`;
+
+    return formatDateIndo(isoOrDate);
+  } catch {
+    return 'baru saja';
+  }
+}
+
 export function getTodayISO(): string {
   const now = new Date();
   const y = now.getFullYear();
