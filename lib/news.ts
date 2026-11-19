@@ -1,5 +1,80 @@
-import { getTickerMeta, StockSector } from '@/data/syariah-list';
 import { NewsSentiment, StockNewsItem, TickerNewsBundle } from './types';
+
+type StockSector =
+  | 'bank'
+  | 'batubara'
+  | 'nikel'
+  | 'energi'
+  | 'telko'
+  | 'konsumer'
+  | 'properti'
+  | 'semen'
+  | 'ritel'
+  | 'teknologi'
+  | 'infrastruktur'
+  | 'industri';
+
+interface TickerMeta {
+  keywords: string[];
+  sector: StockSector;
+  sectorLabel: string;
+}
+
+const TICKER_META: Record<string, TickerMeta> = {
+  BBCA: { keywords: ['bbca', 'bca', 'bank central asia'], sector: 'bank', sectorLabel: 'bank' },
+  BBRI: { keywords: ['bbri', 'bri', 'bank rakyat indonesia'], sector: 'bank', sectorLabel: 'bank' },
+  BMRI: { keywords: ['bmri', 'bank mandiri', 'mandiri'], sector: 'bank', sectorLabel: 'bank' },
+  BBNI: { keywords: ['bbni', 'bni', 'bank negara indonesia'], sector: 'bank', sectorLabel: 'bank' },
+  BRIS: { keywords: ['bris', 'bsi', 'bank syariah indonesia'], sector: 'bank', sectorLabel: 'bank syariah' },
+  ARTO: { keywords: ['arto', 'bank jago', 'jago'], sector: 'bank', sectorLabel: 'bank digital' },
+  ADRO: { keywords: ['adro', 'adaro', 'alamtri'], sector: 'batubara', sectorLabel: 'batubara' },
+  PTBA: { keywords: ['ptba', 'bukit asam'], sector: 'batubara', sectorLabel: 'batubara' },
+  ITMG: { keywords: ['itmg', 'indo tambangraya'], sector: 'batubara', sectorLabel: 'batubara' },
+  BUMI: { keywords: ['bumi', 'bumi resources'], sector: 'batubara', sectorLabel: 'batubara' },
+  DEWA: { keywords: ['dewa', 'darma henwa'], sector: 'batubara', sectorLabel: 'batubara' },
+  ANTM: { keywords: ['antm', 'antam', 'aneka tambang'], sector: 'nikel', sectorLabel: 'tambang & nikel' },
+  INCO: { keywords: ['inco', 'vale indonesia', 'vale'], sector: 'nikel', sectorLabel: 'nikel' },
+  MDKA: { keywords: ['mdka', 'merdeka copper'], sector: 'nikel', sectorLabel: 'tambang & nikel' },
+  MBMA: { keywords: ['mbma', 'merdeka battery'], sector: 'nikel', sectorLabel: 'nikel' },
+  NCKL: { keywords: ['nckl', 'trimegah bangun', 'harita nickel'], sector: 'nikel', sectorLabel: 'nikel' },
+  BRMS: { keywords: ['brms', 'bumi resources minerals'], sector: 'nikel', sectorLabel: 'tambang mineral' },
+  BREN: { keywords: ['bren', 'barito renewables'], sector: 'energi', sectorLabel: 'energi' },
+  PGEO: { keywords: ['pgeo', 'pertamina geothermal'], sector: 'energi', sectorLabel: 'energi' },
+  ESSA: { keywords: ['essa', 'surya esa'], sector: 'energi', sectorLabel: 'energi & gas' },
+  BRPT: { keywords: ['brpt', 'barito pacific'], sector: 'energi', sectorLabel: 'energi & petrokimia' },
+  TPIA: { keywords: ['tpia', 'chandra asri'], sector: 'energi', sectorLabel: 'petrokimia' },
+  TLKM: { keywords: ['tlkm', 'telkom indonesia', 'telkom'], sector: 'telko', sectorLabel: 'telekomunikasi' },
+  EXCL: { keywords: ['excl', 'xl axiata', 'xlsmart'], sector: 'telko', sectorLabel: 'telekomunikasi' },
+  ISAT: { keywords: ['isat', 'indosat'], sector: 'telko', sectorLabel: 'telekomunikasi' },
+  TOWR: { keywords: ['towr', 'sarana menara', 'protelindo'], sector: 'telko', sectorLabel: 'menara telko' },
+  ICBP: { keywords: ['icbp', 'indofood cbp'], sector: 'konsumer', sectorLabel: 'konsumer' },
+  INDF: { keywords: ['indf', 'indofood'], sector: 'konsumer', sectorLabel: 'konsumer' },
+  UNVR: { keywords: ['unvr', 'unilever'], sector: 'konsumer', sectorLabel: 'konsumer' },
+  KLBF: { keywords: ['klbf', 'kalbe farma', 'kalbe'], sector: 'konsumer', sectorLabel: 'farmasi' },
+  SIDO: { keywords: ['sido', 'sido muncul'], sector: 'konsumer', sectorLabel: 'konsumer' },
+  CPIN: { keywords: ['cpin', 'charoen pokphand'], sector: 'konsumer', sectorLabel: 'poultry' },
+  JPFA: { keywords: ['jpfa', 'japfa'], sector: 'konsumer', sectorLabel: 'poultry' },
+  AMRT: { keywords: ['amrt', 'alfamart', 'sumber alfaria'], sector: 'ritel', sectorLabel: 'ritel' },
+  MAPI: { keywords: ['mapi', 'mitra adiperkasa'], sector: 'ritel', sectorLabel: 'ritel' },
+  ERAA: { keywords: ['eraa', 'erajaya'], sector: 'ritel', sectorLabel: 'ritel' },
+  ACES: { keywords: ['aces', 'aspirasi hidup', 'ace hardware', 'azko'], sector: 'ritel', sectorLabel: 'ritel' },
+  GOTO: { keywords: ['goto', 'gojek tokopedia'], sector: 'teknologi', sectorLabel: 'teknologi' },
+  BUKA: { keywords: ['buka', 'bukalapak'], sector: 'teknologi', sectorLabel: 'teknologi' },
+  SCMA: { keywords: ['scma', 'surya citra media'], sector: 'teknologi', sectorLabel: 'media' },
+  CTRA: { keywords: ['ctra', 'ciputra'], sector: 'properti', sectorLabel: 'properti' },
+  SMRA: { keywords: ['smra', 'summarecon'], sector: 'properti', sectorLabel: 'properti' },
+  BSDE: { keywords: ['bsde', 'bumi serpong damai', 'bsd'], sector: 'properti', sectorLabel: 'properti' },
+  PWON: { keywords: ['pwon', 'pakuwon'], sector: 'properti', sectorLabel: 'properti' },
+  SMGR: { keywords: ['smgr', 'semen indonesia', 'sig'], sector: 'semen', sectorLabel: 'semen' },
+  INTP: { keywords: ['intp', 'indocement'], sector: 'semen', sectorLabel: 'semen' },
+  JSMR: { keywords: ['jsmr', 'jasa marga'], sector: 'infrastruktur', sectorLabel: 'infrastruktur' },
+  TOTL: { keywords: ['totl', 'total bangun persada'], sector: 'infrastruktur', sectorLabel: 'konstruksi' },
+  CMNP: { keywords: ['cmnp', 'citra marga'], sector: 'infrastruktur', sectorLabel: 'jalan tol' },
+  ASII: { keywords: ['asii', 'astra international', 'astra'], sector: 'industri', sectorLabel: 'otomotif & industri' },
+  INKP: { keywords: ['inkp', 'indah kiat'], sector: 'industri', sectorLabel: 'pulp & kertas' },
+  TKIM: { keywords: ['tkim', 'tjiwi kimia'], sector: 'industri', sectorLabel: 'pulp & kertas' },
+  SRTG: { keywords: ['srtg', 'saratoga'], sector: 'industri', sectorLabel: 'investasi' },
+};
 
 const POSITIVE_KEYWORDS = [
   'naik',
@@ -8,12 +83,9 @@ const POSITIVE_KEYWORDS = [
   'dividen',
   'buyback',
   'ekspansi',
-  'proyek baru',
   'kontrak baru',
   'rekor',
-  'positif',
   'upgrade',
-  'target naik',
 ];
 
 const NEGATIVE_KEYWORDS = [
@@ -24,13 +96,11 @@ const NEGATIVE_KEYWORDS = [
   'gagal',
   'utang',
   'denda',
-  'negatif',
   'downgrade',
-  'kebakaran',
   'gugatan',
 ];
 
-// Singkatan pendek dicocokkan per batas kata agar "utama"/"perumahan" tidak keliru jadi "UMA"
+// Singkatan pendek dicocokkan per batas kata agar tidak salah tangkap ("utama" != "UMA")
 const NEGATIVE_WORD_REGEXES = [/\buma\b/i, /\bphk\b/i];
 
 const INTERNAL_HINTS = [
@@ -65,6 +135,17 @@ const SECTOR_MACRO_KEYWORDS: Record<StockSector, string[]> = {
   industri: ['rupiah', 'suku bunga', 'ekspor', 'manufaktur', 'pmi', 'ihsg'],
 };
 
+function getTickerMeta(ticker: string): TickerMeta {
+  const clean = ticker.replace(/\.JK$/i, '').trim().toUpperCase();
+  return (
+    TICKER_META[clean] || {
+      keywords: [clean.toLowerCase()],
+      sector: 'industri',
+      sectorLabel: 'pasar',
+    }
+  );
+}
+
 export function classifyNewsSentiment(title: string): NewsSentiment {
   const lower = title.toLowerCase();
 
@@ -74,10 +155,8 @@ export function classifyNewsSentiment(title: string): NewsSentiment {
 
   const isPositive = POSITIVE_KEYWORDS.some((kw) => lower.includes(kw));
 
-  // Prioritaskan NEGATIF demi proteksi risiko trader jika judul ambigu
-  if (isNegative && !isPositive) return 'NEGATIF';
-  if (isPositive && !isNegative) return 'POSITIF';
-  if (isNegative && isPositive) return 'NEGATIF';
+  if (isNegative) return 'NEGATIF';
+  if (isPositive) return 'POSITIF';
   return 'NETRAL';
 }
 
@@ -114,7 +193,8 @@ function truncateText(text: string, maxLen = 68): string {
 }
 
 /**
- * Susun ringkasan berita internal, eksternal relevan, dan pengaruh skor untuk 1 ticker
+ * Susun daftar maks 3 berita, 1 baris Isu Internal, 1 baris Isu Eksternal,
+ * serta flag peringatan negatif / katalis positif 24 jam (terpisah dari skor utama).
  */
 export function buildTickerNewsBundle(
   ticker: string,
@@ -134,21 +214,14 @@ export function buildTickerNewsBundle(
   const hasNegative24h = recent24h.some((item) => item.sentiment === 'NEGATIF');
   const hasPositive24h = recent24h.some((item) => item.sentiment === 'POSITIF');
 
-  // Pengaruh ke skor: -15 jika ada berita negatif 24 jam, +10 jika ada positif 24 jam
-  let scoreDelta = 0;
-  if (hasNegative24h) scoreDelta -= 15;
-  if (hasPositive24h) scoreDelta += 10;
-
-  // Isu Internal: cari berita internal pertama
   const internalItem =
     sortedItems.find((i) => i.is_internal) || sortedItems[0] || null;
   const internalSummary = internalItem
-    ? `${truncateText(internalItem.title, 72)} (${sentimentLabelIndo(
+    ? `${truncateText(internalItem.title, 70)} (${sentimentLabelIndo(
         internalItem.sentiment
       )})`
     : null;
 
-  // Isu Eksternal: cocokkan berita makro paling relevan dengan sektor ticker
   const meta = getTickerMeta(ticker);
   const sectorKeys = SECTOR_MACRO_KEYWORDS[meta.sector] || ['ihsg', 'rupiah'];
 
@@ -161,7 +234,7 @@ export function buildTickerNewsBundle(
     null;
 
   const externalSummary = matchedMacro
-    ? `Eksternal: ${truncateText(matchedMacro.title, 58)} - ${sentimentLabelIndo(
+    ? `${truncateText(matchedMacro.title, 58)} - ${sentimentLabelIndo(
         matchedMacro.sentiment
       )} untuk ${meta.sectorLabel}`
     : null;
@@ -172,6 +245,5 @@ export function buildTickerNewsBundle(
     externalSummary,
     hasNegative24h,
     hasPositive24h,
-    scoreDelta,
   };
 }
