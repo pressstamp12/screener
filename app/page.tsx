@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { DEFAULT_WATCHLIST, isSyariahTicker } from '@/data/syariah-list';
-import { analyzeStockModeD, formatScoreAuditLog } from '@/lib/modeD';
+import { analyzeStockModeD } from '@/lib/modeD';
 import { formatDateIndo, formatRupiah, getTodayISO } from '@/lib/format';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
@@ -55,7 +55,6 @@ const RESULT_FILTER_OPTIONS: { key: ResultQuickFilter; label: string }[] = [
 ];
 
 export default function ScreeningPage() {
-  // State filter harian
   const [priceFilter, setPriceFilter] =
     useState<PriceFilterKey>('default_100_3500');
   const [customMin, setCustomMin] = useState<string>('100');
@@ -63,12 +62,10 @@ export default function ScreeningPage() {
   const [syariahFilter, setSyariahFilter] = useState<SyariahFilter>('all');
   const [modalInput, setModalInput] = useState<string>('500000');
 
-  // Filter cepat di atas hasil + pagination
   const [resultFilter, setResultFilter] = useState<ResultQuickFilter>('all');
   const [onlyStrictModeD, setOnlyStrictModeD] = useState<boolean>(false);
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
 
-  // State data & scan
   const [rawStocks, setRawStocks] = useState<StockRawData[]>([]);
   const [lastScanDate, setLastScanDate] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
@@ -79,7 +76,6 @@ export default function ScreeningPage() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [infoMsg, setInfoMsg] = useState<string>('');
 
-  // State berita per ticker (terpisah dari skor)
   const [newsMap, setNewsMap] = useState<Record<string, TickerNewsBundle>>({});
   const [loadingNewsTickers, setLoadingNewsTickers] = useState<Set<string>>(
     new Set()
@@ -87,7 +83,6 @@ export default function ScreeningPage() {
   const completedNewsRef = useRef<Set<string>>(new Set());
   const inFlightNewsRef = useRef<Set<string>>(new Set());
 
-  // State watchlist
   const [savedTickers, setSavedTickers] = useState<Set<string>>(new Set());
   const [savingTicker, setSavingTicker] = useState<string | null>(null);
 
@@ -96,7 +91,6 @@ export default function ScreeningPage() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 500000;
   }, [modalInput]);
 
-  // Muat cache terakhir dari localStorage & daftar watchlist dari Supabase
   useEffect(() => {
     try {
       const cachedRaw = localStorage.getItem('modeD_last_raw_stocks');
@@ -129,7 +123,6 @@ export default function ScreeningPage() {
     }
   }, [modalNumber]);
 
-  // Reset pagination ke 10 saat filter diubah
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [
@@ -153,7 +146,6 @@ export default function ScreeningPage() {
       : { min: 100, max: 3500 };
   };
 
-  // Analisa Mode D murni teknikal dari calculateScore()
   const screenedList: ScreenedStock[] = useMemo(() => {
     const { min, max } = getPriceBounds();
 
@@ -186,7 +178,6 @@ export default function ScreeningPage() {
     [screenedList, visibleCount]
   );
 
-  // Ambil berita & sentimen otomatis untuk saham yang sedang tampil di layar
   useEffect(() => {
     if (visibleStocks.length === 0) return;
 
@@ -227,7 +218,7 @@ export default function ScreeningPage() {
           }
         }
       } catch {
-        // Jika offline / gagal fetch berita, card teknikal tetap tampil normal
+        // abaikan jika offline
       } finally {
         missingTickers.forEach((t) => inFlightNewsRef.current.delete(t));
         if (!cancelled) {
@@ -255,7 +246,6 @@ export default function ScreeningPage() {
     setVisibleCount(PAGE_SIZE);
     setScanProgress({ done: 0, total: DEFAULT_WATCHLIST.length });
 
-    // Reset cache berita sesi agar ikut refresh
     completedNewsRef.current.clear();
     inFlightNewsRef.current.clear();
     setNewsMap({});
@@ -264,7 +254,6 @@ export default function ScreeningPage() {
       const collected: StockRawData[] = [];
       let lastFetchedIso = new Date().toISOString();
 
-      // Scan batch 10 saham per request agar tidak timeout di Vercel
       for (let i = 0; i < DEFAULT_WATCHLIST.length; i += SCAN_BATCH_SIZE) {
         const batch = DEFAULT_WATCHLIST.slice(i, i + SCAN_BATCH_SIZE);
         const res = await fetch(`/api/stocks?tickers=${batch.join(',')}`, {
@@ -298,15 +287,23 @@ export default function ScreeningPage() {
       setRawStocks(collected);
       setLastScanDate(lastFetchedIso);
 
-      // Validasi otomatis di console untuk setiap saham hasil scan
+      // Log validasi console langsung dari hasil calculateScore()
       const analyzedAll = collected.map((raw) =>
         analyzeStockModeD(raw, modalNumber)
       );
       console.group(
         `[Mode D Screener] Validasi Skor (${analyzedAll.length} saham)`
       );
-      analyzedAll.forEach((stock) => {
-        console.log(formatScoreAuditLog(stock));
+      analyzedAll.forEach((s) => {
+        console.log(
+          `${s.ticker} - Drop:${s.checks.isDrop ? 20 : 0} Dekat:${
+            s.checks.isDekat ? 30 : 0
+          } RSI:${s.checks.isRSI ? 15 : 0} (${s.rsi.toFixed(1)}) Vol:${
+            s.checks.isVol ? 25 : 0
+          } Candle:${s.checks.isCandle ? 10 : 0} = Skor:${s.score} [${
+            s.scoreBreakdown
+          }]`
+        );
       });
       console.groupEnd();
 
@@ -338,7 +335,7 @@ export default function ScreeningPage() {
             price: s.price,
             support: s.support,
             resistance: s.resistance,
-            rsi: s.rsi,
+            rsi: Number(s.rsi.toFixed(1)),
             volume_ratio: s.volumeRatio,
             score: s.score,
             label: s.label,
@@ -581,7 +578,6 @@ export default function ScreeningPage() {
         </button>
       </section>
 
-      {/* Notifikasi Info / Error */}
       {errorMsg && (
         <div className="bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-2xl p-3.5 text-sm flex items-start gap-2.5">
           <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -596,7 +592,6 @@ export default function ScreeningPage() {
         </div>
       )}
 
-      {/* Filter Cepat di Atas Hasil + Ringkasan */}
       {rawStocks.length > 0 && (
         <div className="space-y-2.5">
           <div className="flex flex-wrap gap-2">
@@ -650,7 +645,6 @@ export default function ScreeningPage() {
         </div>
       )}
 
-      {/* Daftar Card Hasil Screening (10 per halaman) */}
       {visibleStocks.length > 0 ? (
         <section className="space-y-4">
           {visibleStocks.map((stock) => (
@@ -665,7 +659,6 @@ export default function ScreeningPage() {
             />
           ))}
 
-          {/* Tombol Pagination MUAT LEBIH BANYAK */}
           {remainingCount > 0 && (
             <button
               type="button"
