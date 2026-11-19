@@ -166,7 +166,7 @@ async function fetchGoogleNews(
 
 async function getCachedNewsFromSupabase(
   tickers: string[]
-): Promise> {
+) {
   const result = new Map<string, StockNewsItem[]>();
   if (!isSupabaseConfigured || tickers.length === 0) return result;
 
