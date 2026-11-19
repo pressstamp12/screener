@@ -1,0 +1,485 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { Radar, SlidersHorizontal, RefreshCw, AlertCircle, Sparkles } from 'lucide-react';
+import { DEFAULT_WATCHLIST, isSyariahTicker } from '@/data/syariah-list';
+import { analyzeStockModeD } from '@/lib/modeD';
+import { formatDateIndo, formatRupiah, getTodayISO } from '@/lib/format';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import {
+  PriceFilterKey,
+  ScreenedStock,
+  StockRawData,
+  SyariahFilter,
+} from '@/lib/types';
+import StockCard from '@/components/StockCard';
+
+const PRICE_OPTIONS: {
+  key: PriceFilterKey;
+  label: string;
+  min: number;
+  max: number;
+}[] = [
+  { key: 'default_100_3500', label: '100 - 3.500', min: 100, max: 3500 },
+  { key: 'all', label: 'Semua', min: 0, max: Infinity },
+  { key: '100_500', label: '100 - 500', min: 100, max: 500 },
+  { key: '500_1000', label: '500 - 1.000', min: 500, max: 1000 },
+  { key: '1000_2000', label: '1.000 - 2.000', min: 1000, max: 2000 },
+  { key: '2000_3500', label: '2.000 - 3.500', min: 2000, max: 3500 },
+  { key: 'custom', label: 'Custom Min - Max', min: 100, max: 3500 },
+];
+
+const SYARIAH_OPTIONS: { key: SyariahFilter; label: string }[] = [
+  { key: 'all', label: 'Semua Saham' },
+  { key: 'syariah', label: 'Hanya Saham Syariah' },
+  { key: 'non_syariah', label: 'Hanya Non-Syariah' },
+];
+
+export default function ScreeningPage() {
+  // State filter user
+  const [priceFilter, setPriceFilter] = useState<PriceFilterKey>('default_100_3500');
+  const [customMin, setCustomMin] = useState<string>('100');
+  const [customMax, setCustomMax] = useState<string>('3500');
+  const [syariahFilter, setSyariahFilter] = useState<SyariahFilter>('all');
+  const [modalInput, setModalInput] = useState<string>('500000');
+  const [onlyStrictModeD, setOnlyStrictModeD] = useState<boolean>(false);
+
+  // State data & scan
+  const [rawStocks, setRawStocks] = useState<StockRawData[]>([]);
+  const [lastScanDate, setLastScanDate] = useState<string>('');
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [infoMsg, setInfoMsg] = useState<string>('');
+  const [savedTickers, setSavedTickers] = useState<Set<string>>(new Set());
+  const [savingTicker, setSavingTicker] = useState<string | null>(null);
+
+  const modalNumber = useMemo(() => {
+    const parsed = Number(modalInput.replace(/[^0-9]/g, ''));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 500000;
+  }, [modalInput]);
+
+  // Muat cache terakhir dari localStorage & daftar watchlist dari Supabase
+  useEffect(() => {
+    try {
+      const cachedRaw = localStorage.getItem('modeD_last_raw_stocks');
+      const cachedDate = localStorage.getItem('modeD_last_scan_date');
+      const cachedModal = localStorage.getItem('modeD_user_modal');
+      if (cachedRaw) setRawStocks(JSON.parse(cachedRaw));
+      if (cachedDate) setLastScanDate(cachedDate);
+      if (cachedModal) setModalInput(cachedModal);
+    } catch {
+      // abaikan error parse cache
+    }
+
+    if (isSupabaseConfigured) {
+      supabase
+        .from('watchlist')
+        .select('ticker')
+        .then(({ data }) => {
+          if (data) {
+            setSavedTickers(new Set(data.map((row) => row.ticker)));
+          }
+        });
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('modeD_user_modal', String(modalNumber));
+    } catch {
+      // abaikan
+    }
+  }, [modalNumber]);
+
+  const getPriceBounds = (): { min: number; max: number } => {
+    if (priceFilter === 'custom') {
+      const min = Number(customMin) || 0;
+      const max = Number(customMax) || Infinity;
+      return { min, max };
+    }
+    const found = PRICE_OPTIONS.find((o) => o.key === priceFilter);
+    return found ? { min: found.min, max: found.max } : { min: 100, max: 3500 };
+  };
+
+  // Hitung analisa Mode D secara real-time saat modal/filter berubah
+  const screenedList: ScreenedStock[] = useMemo(() => {
+    const { min, max } = getPriceBounds();
+
+    return rawStocks
+      .map((raw) => analyzeStockModeD(raw, modalNumber))
+      .filter((s) => {
+        if (s.price < min || s.price > max) return false;
+        if (syariahFilter === 'syariah' && !s.isSyariah) return false;
+        if (syariahFilter === 'non_syariah' && s.isSyariah) return false;
+        if (onlyStrictModeD && !s.checks.allModeD) return false;
+        return true;
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [rawStocks, modalNumber, priceFilter, customMin, customMax, syariahFilter, onlyStrictModeD]);
+
+  const handleScanToday = async () => {
+    setIsScanning(true);
+    setErrorMsg('');
+    setInfoMsg('');
+
+    try {
+      const tickersQuery = DEFAULT_WATCHLIST.join(',');
+      const res = await fetch(`/api/stocks?tickers=${tickersQuery}`, {
+        cache: 'no-store',
+      });
+
+      if (!res.ok) {
+        throw new Error('Gagal ambil data saham. Cek koneksi internet kamu.');
+      }
+
+      const data = await res.json();
+      const fetchedStocks: StockRawData[] = data.stocks || [];
+
+      if (fetchedStocks.length === 0) {
+        throw new Error('Yahoo Finance lagi sibuk atau data kosong. Coba scan ulang.');
+      }
+
+      setRawStocks(fetchedStocks);
+      const nowIso = data.fetchedAt || new Date().toISOString();
+      setLastScanDate(nowIso);
+
+      // Simpan cache lokal untuk mode offline
+      try {
+        localStorage.setItem('modeD_last_raw_stocks', JSON.stringify(fetchedStocks));
+        localStorage.setItem('modeD_last_scan_date', nowIso);
+      } catch {
+        // abaikan jika storage penuh
+      }
+
+      // Simpan hasil screening ke Supabase
+      if (isSupabaseConfigured) {
+        const today = getTodayISO();
+        const { min, max } = getPriceBounds();
+
+        const analyzedForDb = fetchedStocks
+          .map((raw) => analyzeStockModeD(raw, modalNumber))
+          .filter((s) => {
+            if (s.price < min || s.price > max) return false;
+            if (syariahFilter === 'syariah' && !s.isSyariah) return false;
+            if (syariahFilter === 'non_syariah' && s.isSyariah) return false;
+            return true;
+          });
+
+        if (analyzedForDb.length > 0) {
+          const rows = analyzedForDb.map((s) => ({
+            date: today,
+            ticker: s.ticker,
+            price: s.price,
+            support: s.support,
+            resistance: s.resistance,
+            rsi: s.rsi,
+            volume_ratio: s.volumeRatio,
+            score: s.score,
+            label: s.label,
+            is_syariah: isSyariahTicker(s.ticker),
+          }));
+
+          const { error: dbErr } = await supabase
+            .from('screening_results')
+            .insert(rows);
+
+          if (dbErr) {
+            console.warn('Gagal simpan ke Supabase:', dbErr.message);
+            setInfoMsg('Scan berhasil! (Catatan: belum tersimpan ke Supabase)');
+          } else {
+            setInfoMsg(
+              `Berhasil scan ${fetchedStocks.length} saham & simpan ke Supabase!`
+            );
+          }
+        } else {
+          setInfoMsg(
+            `Berhasil scan ${fetchedStocks.length} saham. Coba longgarkan filter harga/syariah kalau daftar kosong.`
+          );
+        }
+      } else {
+        setInfoMsg(
+          `Berhasil scan ${fetchedStocks.length} saham! Isi ENV Supabase biar hasil ikut tersimpan di database.`
+        );
+      }
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : 'Terjadi kesalahan saat scan.'
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleSaveWatchlist = async (stock: ScreenedStock) => {
+    if (!isSupabaseConfigured) {
+      setErrorMsg('Isi NEXT_PUBLIC_SUPABASE_URL & ANON_KEY dulu biar bisa simpan ke Watchlist.');
+      return;
+    }
+
+    setSavingTicker(stock.ticker);
+    setErrorMsg('');
+
+    try {
+      const lot = Math.max(1, stock.lotAffordable);
+      const entryPlan = stock.price;
+      const tp = Math.max(stock.resistance, Math.round(entryPlan * 1.06));
+      const sl = Math.max(50, Math.round(stock.support * 0.98));
+      const modal = entryPlan * lot * 100;
+
+      const { error } = await supabase.from('watchlist').upsert(
+        {
+          ticker: stock.ticker,
+          entry_plan: entryPlan,
+          tp,
+          sl,
+          lot,
+          modal,
+        },
+        { onConflict: 'ticker' }
+      );
+
+      if (error) throw error;
+
+      setSavedTickers((prev) => new Set(prev).add(stock.ticker));
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? `Gagal simpan ${stock.ticker}: ${err.message}`
+          : 'Gagal simpan ke Watchlist.'
+      );
+    } finally {
+      setSavingTicker(null);
+    }
+  };
+
+  const reboundCount = screenedList.filter((s) => s.label === 'POTENSI REBOUND').length;
+  const strictCount = screenedList.filter((s) => s.checks.allModeD).length;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <header className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#00C853] animate-pulse" />
+            <h1 className="text-2xl font-black tracking-tight text-white">
+              Mode D Screener
+            </h1>
+          </div>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Pantau saham rebound IDX buat modal santai
+          </p>
+        </div>
+        {lastScanDate && (
+          <span className="text-[11px] bg-[#1A1A1A] border border-[#2A2A2A] px-2.5 py-1 rounded-lg text-zinc-300">
+            Update: {formatDateIndo(lastScanDate)}
+          </span>
+        )}
+      </header>
+
+      {/* Panel Filter */}
+      <section className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-bold text-zinc-200">
+          <SlidersHorizontal className="w-4 h-4 text-[#00C853]" />
+          <span>Filter Harian</span>
+        </div>
+
+        {/* a. Range Harga */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-zinc-400 block">
+            Range Harga Saham (Rp)
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {PRICE_OPTIONS.map((opt) => {
+              const active = priceFilter === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setPriceFilter(opt.key)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                    active
+                      ? 'bg-[#00C853] text-black'
+                      : 'bg-[#121212] text-zinc-300 border border-[#2A2A2A]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {priceFilter === 'custom' && (
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <div>
+                <span className="text-[11px] text-zinc-400">Min (Rp)</span>
+                <input
+                  type="number"
+                  value={customMin}
+                  onChange={(e) => setCustomMin(e.target.value)}
+                  placeholder="100"
+                  className="w-full mt-1 bg-[#121212] border border-[#333] rounded-xl px-3 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
+                />
+              </div>
+              <div>
+                <span className="text-[11px] text-zinc-400">Max (Rp)</span>
+                <input
+                  type="number"
+                  value={customMax}
+                  onChange={(e) => setCustomMax(e.target.value)}
+                  placeholder="3500"
+                  className="w-full mt-1 bg-[#121212] border border-[#333] rounded-xl px-3 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* b. Filter Syariah */}
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-zinc-400 block">
+            Syariah / Non-Syariah (ISSI & JII)
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {SYARIAH_OPTIONS.map((opt) => {
+              const active = syariahFilter === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setSyariahFilter(opt.key)}
+                  className={`px-2 py-2.5 rounded-xl text-xs font-bold text-center transition-all active:scale-95 ${
+                    active
+                      ? 'bg-[#00C853] text-black'
+                      : 'bg-[#121212] text-zinc-300 border border-[#2A2A2A]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* c. Modal Saya */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label
+              htmlFor="modal-saya"
+              className="text-xs font-semibold text-zinc-400"
+            >
+              Modal Saya (buat hitung lot)
+            </label>
+            <span className="text-xs font-bold text-[#00C853]">
+              {formatRupiah(modalNumber)}
+            </span>
+          </div>
+          <input
+            id="modal-saya"
+            type="number"
+            inputMode="numeric"
+            value={modalInput}
+            onChange={(e) => setModalInput(e.target.value)}
+            placeholder="500000"
+            className="w-full bg-[#121212] border border-[#333] rounded-xl px-4 py-3 text-base font-extrabold text-white focus:outline-none focus:border-[#00C853]"
+          />
+        </div>
+
+        {/* Tombol Besar SCAN HARI INI */}
+        <button
+          type="button"
+          disabled={isScanning}
+          onClick={handleScanToday}
+          className="w-full min-h-[56px] bg-[#00C853] hover:bg-[#00e05d] disabled:opacity-60 text-black font-black text-base rounded-2xl flex items-center justify-center gap-2.5 shadow-lg shadow-[#00C853]/20 transition-all active:scale-[0.98]"
+        >
+          {isScanning ? (
+            <>
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              Sedang scan {DEFAULT_WATCHLIST.length} saham...
+            </>
+          ) : (
+            <>
+              <Radar className="w-5 h-5 stroke-[2.5]" />
+              SCAN HARI INI
+            </>
+          )}
+        </button>
+      </section>
+
+      {/* Notifikasi Info / Error */}
+      {errorMsg && (
+        <div className="bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-2xl p-3.5 text-sm flex items-start gap-2.5">
+          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {infoMsg && !errorMsg && (
+        <div className="bg-[#00C853]/10 border border-[#00C853]/30 text-[#00C853] rounded-2xl p-3.5 text-xs font-semibold flex items-center gap-2">
+          <Sparkles className="w-4 h-4 shrink-0" />
+          <span>{infoMsg}</span>
+        </div>
+      )}
+
+      {/* Ringkasan & Toggle Mode D Ketat */}
+      {rawStocks.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-zinc-400">
+            Ketemu <strong className="text-white">{screenedList.length}</strong> saham
+            {reboundCount > 0 && (
+              <>
+                {' · '}
+                <strong className="text-[#00C853]">
+                  {reboundCount} Potensi Rebound
+                </strong>
+              </>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setOnlyStrictModeD((v) => !v)}
+            className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+              onlyStrictModeD
+                ? 'bg-[#00C853]/20 text-[#00C853] border-[#00C853]/50'
+                : 'bg-[#1A1A1A] text-zinc-300 border-[#2A2A2A]'
+            }`}
+          >
+            {onlyStrictModeD
+              ? `Mode D Penuh (${strictCount})`
+              : 'Filter 5 Syarat Penuh'}
+          </button>
+        </div>
+      )}
+
+      {/* Daftar Card Hasil Screening */}
+      {screenedList.length > 0 ? (
+        <section className="space-y-4">
+          {screenedList.map((stock) => (
+            <StockCard
+              key={stock.ticker}
+              stock={stock}
+              isSaved={savedTickers.has(stock.ticker)}
+              isSaving={savingTicker === stock.ticker}
+              onSaveWatchlist={handleSaveWatchlist}
+            />
+          ))}
+        </section>
+      ) : (
+        <section className="bg-[#1A1A1A] border border-dashed border-[#333] rounded-2xl p-8 text-center space-y-2">
+          <Radar className="w-10 h-10 text-zinc-600 mx-auto" />
+          <p className="font-bold text-zinc-200">
+            {rawStocks.length === 0
+              ? 'Belum ada hasil scan hari ini'
+              : 'Tidak ada saham yang cocok dengan filter aktif'}
+          </p>
+          <p className="text-xs text-zinc-400">
+            {rawStocks.length === 0
+              ? 'Atur filter di atas lalu tekan tombol hijau SCAN HARI INI.'
+              : 'Coba matikan "Filter 5 Syarat Penuh" atau ubah range harga / syariah.'}
+          </p>
+        </section>
+      )}
+    </div>
+  );
+}
