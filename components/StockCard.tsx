@@ -12,6 +12,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
+import { calculateScore } from '@/lib/modeD';
 import { NewsSentiment, ScreenedStock, TickerNewsBundle } from '@/lib/types';
 import {
   formatPercent,
@@ -47,17 +48,26 @@ export default function StockCard({
   isSaving,
   onSaveWatchlist,
 }: StockCardProps) {
+  // Hitung skor, label, & checklist dari 1 fungsi tunggal calculateScore()
+  const { checks, score, label } = calculateScore({
+    dropPercent: Number((-stock.dropFromHigh20).toFixed(1)),
+    distToSupport: stock.distToSupport,
+    rsi: stock.rsi,
+    volumeRatio: stock.volumeRatio,
+    isGreenCandle: stock.isGreenCandle,
+  });
+
   const labelStyle =
-    stock.label === 'POTENSI REBOUND'
+    label === 'POTENSI REBOUND'
       ? 'bg-[#00C853]/15 text-[#00C853] border-[#00C853]/40'
-      : stock.label === 'TUNGGU'
+      : label === 'TUNGGU'
       ? 'bg-[#FFB300]/15 text-[#FFB300] border-[#FFB300]/40'
       : 'bg-[#FF3B30]/15 text-[#FF3B30] border-[#FF3B30]/40';
 
   const scoreBarColor =
-    stock.score >= 60
+    score >= 60
       ? 'bg-[#00C853]'
-      : stock.score >= 40
+      : score >= 40
       ? 'bg-[#FFB300]'
       : 'bg-[#FF3B30]';
 
@@ -97,7 +107,7 @@ export default function StockCard({
         <span
           className={`text-xs font-extrabold px-2.5 py-1.5 rounded-xl border shrink-0 ${labelStyle}`}
         >
-          {stock.label}
+          {label}
         </span>
       </div>
 
@@ -128,14 +138,14 @@ export default function StockCard({
           <span className="text-[11px] text-zinc-400 block">Skor Rebound</span>
           <span
             className={`text-2xl font-black ${
-              stock.score >= 60
+              score >= 60
                 ? 'text-[#00C853]'
-                : stock.score >= 40
+                : score >= 40
                 ? 'text-[#FFB300]'
                 : 'text-[#FF3B30]'
             }`}
           >
-            {stock.score}
+            {score}
             <span className="text-xs font-normal text-zinc-500">/100</span>
           </span>
         </div>
@@ -145,7 +155,7 @@ export default function StockCard({
       <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-300 ${scoreBarColor}`}
-          style={{ width: `${Math.min(100, Math.max(4, stock.score))}%` }}
+          style={{ width: `${Math.min(100, Math.max(4, score))}%` }}
         />
       </div>
 
@@ -160,7 +170,7 @@ export default function StockCard({
           </span>
           <span
             className={`block text-xs font-semibold mt-0.5 ${
-              stock.checks.supportOk ? 'text-[#00C853]' : 'text-zinc-400'
+              checks.supportOk ? 'text-[#00C853]' : 'text-zinc-400'
             }`}
           >
             Jarak: {formatPercent(stock.distToSupport)}
@@ -182,7 +192,7 @@ export default function StockCard({
         <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525] flex flex-col justify-between">
           <span
             className="font-bold text-base block"
-            style={{ color: stock.checks.rsiOk ? '#00C853' : '#FFFFFF' }}
+            style={{ color: checks.rsiOk ? '#00C853' : '#FFFFFF' }}
           >
             RSI (14) : {rsiDisplay}
           </span>
@@ -197,14 +207,14 @@ export default function StockCard({
           </span>
           <span
             className={`font-bold text-base ${
-              stock.checks.volumeOk ? 'text-[#00C853]' : 'text-white'
+              checks.volumeOk ? 'text-[#00C853]' : 'text-white'
             }`}
           >
             {stock.volumeRatio}x Vol
           </span>
           <span
             className={`block text-[11px] ${
-              stock.checks.dropOk ? 'text-[#00C853]' : 'text-zinc-400'
+              checks.dropOk ? 'text-[#00C853]' : 'text-zinc-400'
             }`}
           >
             Dari High: {stock.dropFromHigh20}%
@@ -216,48 +226,48 @@ export default function StockCard({
       <div className="flex flex-wrap gap-1.5 text-[11px]">
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            stock.checks.dropOk
+            checks.dropOk
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.dropOk ? '✓' : '✕'} Drop &gt;8%
+          {checks.dropOk ? '✓' : '✕'} Drop &gt;8%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            stock.checks.supportOk
+            checks.supportOk
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.supportOk ? '✓' : '✕'} Dekat Support ≤4%
+          {checks.supportOk ? '✓' : '✕'} Dekat Support ≤4%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            stock.checks.rsiOk
+            checks.rsiOk
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.rsiOk ? '✓' : '✕'} RSI 28-48
+          {checks.rsiOk ? '✓' : '✕'} RSI 28-48
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            stock.checks.volumeOk
+            checks.volumeOk
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.volumeOk ? '✓' : '✕'} Vol &gt;1.2x
+          {checks.volumeOk ? '✓' : '✕'} Vol &gt;1.2x
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            stock.checks.greenCandle
+            checks.greenCandle
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.greenCandle ? '✓' : '✕'} Candle Hijau
+          {checks.greenCandle ? '✓' : '✕'} Candle Hijau
         </span>
       </div>
 
