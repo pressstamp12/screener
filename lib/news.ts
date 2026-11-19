@@ -123,6 +123,7 @@ const TICKER_COMPANY_KEYWORDS: Record<string, string[]> = {
 const POSITIVE_KEYWORDS = [
   'naik',
   'menguat',
+  'melonjak',
   'untung',
   'laba',
   'cuan',
@@ -132,6 +133,7 @@ const POSITIVE_KEYWORDS = [
   'kontrak baru',
   'proyek baru',
   'rekor',
+  'positif',
   'upgrade',
   'target naik',
   'berpotensi cuan',
@@ -141,7 +143,38 @@ const POSITIVE_KEYWORDS = [
   'ekspor naik',
 ];
 
+// Semua lowercase, dicek menggunakan .includes() dan diprioritaskan sebelum keyword positif
 const NEGATIVE_KEYWORDS = [
+  // Keluar / pencoretan indeks & MSCI
+  'hapus',
+  'dihapus',
+  'dikeluarkan',
+  'keluar dari indeks',
+  'keluar dari',
+  'dicoret',
+  'dikeluarkan dari indeks',
+  'hapus dari msci',
+  'keluar msci',
+  'msci hapus',
+  // Penurunan kelas / downgrade
+  'turun kelas',
+  'turun kasta',
+  'downgrade',
+  'diturunkan',
+  // Pengurangan posisi / aksi jual institusi
+  'kurangi posisi',
+  'mengurangi posisi',
+  'jual',
+  'lepas saham',
+  'divestasi',
+  'exit',
+  'kurangi kepemilikan',
+  // ARB & sentimen negatif umum lainnya
+  'sentuh arb',
+  'auto reject bawah',
+  'auto rejection bawah',
+  'mentok bawah',
+  'arb berjilid',
   'rugi',
   'turun',
   'anjlok',
@@ -151,19 +184,13 @@ const NEGATIVE_KEYWORDS = [
   'utang',
   'denda',
   'negatif',
-  'downgrade',
   'kebakaran',
   'gugatan',
   'penurunan laba',
   'kinerja turun',
-  'sentuh arb',
-  'auto reject bawah',
-  'auto rejection bawah',
-  'mentok bawah',
-  'arb berjilid',
 ];
 
-// Singkatan pendek dicocokkan per batas kata agar "terbaru"/"perumahan" tidak keliru
+// Singkatan pendek dicocokkan per batas kata agar kata umum tidak salah tangkap
 const NEGATIVE_WORD_REGEXES = [/\barb\b/i, /\buma\b/i, /\bphk\b/i];
 
 const INTERNAL_HINTS = [
@@ -181,6 +208,8 @@ const INTERNAL_HINTS = [
   'emiten',
   'perseroan',
   'direksi',
+  'msci',
+  'kepemilikan',
 ];
 
 export const MAX_NEWS_AGE_DAYS = 7;
@@ -214,10 +243,11 @@ export function isWithin24Hours(publishedAt: string): boolean {
 }
 
 /**
- * Klasifikasi sentimen dari judul + snippet berita:
- * - Ada kata NEGATIF (termasuk ARB) => NEGATIF
- * - Ada kata POSITIF & tidak ada NEGATIF => POSITIF
- * - Tidak ada keduanya => NETRAL
+ * Klasifikasi sentimen dari judul + snippet berita.
+ * ATURAN PRIORITAS:
+ * 1. Jika mengandung SATU SAJA keyword NEGATIF => WAJIB NEGATIF (meski ada kata positif).
+ * 2. Jika tidak ada NEGATIF dan mengandung keyword POSITIF => POSITIF.
+ * 3. Selain itu => NETRAL.
  */
 export function classifyNewsSentiment(title: string, snippet = ''): NewsSentiment {
   const combined = `${title} ${snippet}`.toLowerCase();
@@ -271,6 +301,17 @@ function truncateText(text: string, maxLen = 68): string {
   return `${clean.slice(0, maxLen - 1).trim()}…`;
 }
 
+function resolveItemSentiment(item: StockNewsItem): NewsSentiment {
+  const fromTitle = classifyNewsSentiment(item.title);
+  if (fromTitle === 'NEGATIF') return 'NEGATIF';
+  if (item.sentiment === 'NEGATIF') return 'NEGATIF';
+  if (fromTitle === 'POSITIF') return 'POSITIF';
+  return item.sentiment || 'NETRAL';
+}
+
+/**
+ * Susun daftar berita, Isu Internal, & Isu Eksternal dengan aturan sentimen yang sama.
+ */
 export function buildTickerNewsBundle(
   ticker: string,
   tickerItems: StockNewsItem[],
@@ -282,7 +323,11 @@ export function buildTickerNewsBundle(
       (a, b) =>
         new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
     )
-    .slice(0, 3);
+    .slice(0, 3)
+    .map((item) => ({
+      ...item,
+      sentiment: resolveItemSentiment(item),
+    }));
 
   const recent24h = freshSorted.filter((item) =>
     isWithin24Hours(item.published_at)
@@ -306,7 +351,11 @@ export function buildTickerNewsBundle(
     .sort(
       (a, b) =>
         new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
-    );
+    )
+    .map((m) => ({
+      ...m,
+      sentiment: resolveItemSentiment(m),
+    }));
 
   const matchedMacro =
     freshSectorMacros.find((m) => {
