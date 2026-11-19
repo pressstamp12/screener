@@ -3,29 +3,99 @@ import { DEFAULT_WATCHLIST } from '@/data/syariah-list';
 import { Candle, StockRawData } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
+export const preferredRegion = 'sin1';
 
 const YAHOO_HOSTS = [
   'https://query1.finance.yahoo.com',
   'https://query2.finance.yahoo.com',
 ];
 
-async function fetchYahooStock(ticker: string): Promise<StockRawData> {
-  const cleanTicker = ticker.replace(/\.JK$/i, '').trim().toUpperCase();
-  const symbol = `${cleanTicker}.JK`;
+const BROWSER_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  Accept: 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+  Referer: 'https://finance.yahoo.com/',
+  Origin: 'https://finance.yahoo.com',
+};
 
+// Cache singkat 3 menit di memory server agar tidak kena rate-limit saat scan ulang
+const CACHE_TTL_MS = 3 * 60 * 1000;
+const stockCache = new Map<string, { data: StockRawData; expiresAt: number }>();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 8000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getYahooSessionCookie(): Promise<string> {
+  try {
+    const res = await fetchWithTimeout(
+      'https://fc.yahoo.com',
+      {
+        cache: 'no-store',
+        redirect: 'manual',
+        headers: { 'User-Agent': BROWSER_HEADERS['User-Agent'] },
+      },
+      4000
+    );
+    const setCookie = res.headers.get('set-cookie');
+    if (!setCookie) return '';
+    return setCookie.split(';')[0] || '';
+  } catch {
+    return '';
+  }
+}
+
+async function fetchYahooStock(
+  ticker: string,
+  cookie: string
+): Promise<StockRawData> {
+  const cleanTicker = ticker.replace(/\.JK$/i, '').trim().toUpperCase();
+
+  const cached = stockCache.get(cleanTicker);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  const symbol = `${cleanTicker}.JK`;
   let lastError: Error | null = null;
 
   for (const host of YAHOO_HOSTS) {
     try {
-      const url = `${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=3mo&interval=1d`;
-      const res = await fetch(url, {
+      const url = `${host}/v8/finance/chart/${encodeURIComponent(
+        symbol
+      )}?range=3mo&interval=1d&includePrePost=false&events=div%2Csplits`;
+
+      const headers: Record<string, string> = { ...BROWSER_HEADERS };
+      if (cookie) {
+        headers.Cookie = cookie;
+      }
+
+      const res = await fetchWithTimeout(url, {
         cache: 'no-store',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-          Accept: 'application/json',
-        },
+        headers,
       });
+
+      if (res.status === 429) {
+        await sleep(500);
+        throw new Error('HTTP 429 (Rate limit Yahoo Finance)');
+      }
 
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} dari Yahoo Finance`);
@@ -86,7 +156,7 @@ async function fetchYahooStock(ticker: string): Promise<StockRawData> {
           : prevCandle.close
       );
 
-      return {
+      const parsed: StockRawData = {
         ticker: cleanTicker,
         name: meta.shortName || meta.longName || cleanTicker,
         currency: meta.currency || 'IDR',
@@ -94,6 +164,13 @@ async function fetchYahooStock(ticker: string): Promise<StockRawData> {
         prevClose,
         candles: candles.slice(-45),
       };
+
+      stockCache.set(cleanTicker, {
+        data: parsed,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
+
+      return parsed;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
     }
@@ -114,24 +191,34 @@ export async function GET(request: NextRequest) {
     : DEFAULT_WATCHLIST;
 
   const uniqueTickers = Array.from(new Set(tickers)).slice(0, 30);
-
-  const settled = await Promise.allSettled(
-    uniqueTickers.map((ticker) => fetchYahooStock(ticker))
-  );
+  const cookie = await getYahooSessionCookie();
 
   const stocks: StockRawData[] = [];
   const errors: { ticker: string; message: string }[] = [];
 
-  settled.forEach((item, idx) => {
-    if (item.status === 'fulfilled') {
-      stocks.push(item.value);
-    } else {
-      errors.push({
-        ticker: uniqueTickers[idx],
-        message: item.reason?.message || 'Gagal fetch',
-      });
+  // Proses per 3 saham agar tidak memicu rate-limit Yahoo Finance
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < uniqueTickers.length; i += BATCH_SIZE) {
+    const batch = uniqueTickers.slice(i, i + BATCH_SIZE);
+    const settled = await Promise.allSettled(
+      batch.map((ticker) => fetchYahooStock(ticker, cookie))
+    );
+
+    settled.forEach((item, idx) => {
+      if (item.status === 'fulfilled') {
+        stocks.push(item.value);
+      } else {
+        errors.push({
+          ticker: batch[idx],
+          message: item.reason?.message || 'Gagal fetch',
+        });
+      }
+    });
+
+    if (i + BATCH_SIZE < uniqueTickers.length) {
+      await sleep(300);
     }
-  });
+  }
 
   return NextResponse.json({
     fetchedAt: new Date().toISOString(),
