@@ -18,10 +18,34 @@ export interface StockRawData {
 
 export type ReboundLabel = 'POTENSI REBOUND' | 'TUNGGU' | 'SKIP';
 
+export type NewsSentiment = 'POSITIF' | 'NEGATIF' | 'NETRAL';
+
+export interface StockNewsItem {
+  id?: number;
+  ticker: string;
+  title: string;
+  source: string;
+  published_at: string;
+  sentiment: NewsSentiment;
+  is_internal: boolean;
+  url: string;
+  created_at?: string;
+}
+
+export interface TickerNewsBundle {
+  items: StockNewsItem[];
+  internalSummary: string | null;
+  externalSummary: string | null;
+  hasNegative24h: boolean;
+  hasPositive24h: boolean;
+  scoreDelta: number;
+}
+
 export interface ScreenedStock {
   ticker: string;
   name: string;
   isSyariah: boolean;
+  isLq45: boolean;
   price: number;
   prevClose: number;
   changePercent: number;
@@ -32,10 +56,13 @@ export interface ScreenedStock {
   distToResistance: number;
   dropFromHigh20: number;
   rsi: number;
+  isRsiApprox: boolean;
   volumeToday: number;
   avgVolume20: number;
   volumeRatio: number;
   isGreenCandle: boolean;
+  baseScore: number;
+  newsScoreDelta: number;
   score: number;
   label: ReboundLabel;
   lotAffordable: number;
@@ -60,6 +87,8 @@ export type PriceFilterKey =
   | 'custom';
 
 export type SyariahFilter = 'all' | 'syariah' | 'non_syariah';
+
+export type ResultQuickFilter = 'all' | 'lq45' | 'syariah' | 'score_gt_60';
 
 export interface WatchlistItem {
   id: number;
