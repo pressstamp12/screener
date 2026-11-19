@@ -3,22 +3,46 @@
 import {
   AlertTriangle,
   BookmarkPlus,
+  Building2,
   Check,
-  TrendingUp,
+  ExternalLink,
+  Globe,
+  Newspaper,
+  Sparkles,
   TrendingDown,
+  TrendingUp,
 } from 'lucide-react';
-import { ScreenedStock } from '@/lib/types';
-import { formatPercent, formatPrice, formatRupiah } from '@/lib/format';
+import { NewsSentiment, ScreenedStock, TickerNewsBundle } from '@/lib/types';
+import {
+  formatPercent,
+  formatPrice,
+  formatRelativeTimeIndo,
+  formatRupiah,
+} from '@/lib/format';
 
 interface StockCardProps {
   stock: ScreenedStock;
+  news?: TickerNewsBundle;
+  isLoadingNews?: boolean;
   isSaved: boolean;
   isSaving: boolean;
   onSaveWatchlist: (stock: ScreenedStock) => void;
 }
 
+function getSentimentBadgeClass(sentiment: NewsSentiment): string {
+  if (sentiment === 'POSITIF') {
+    return 'bg-[#00C853]/15 text-[#00C853] border-[#00C853]/40';
+  }
+  if (sentiment === 'NEGATIF') {
+    return 'bg-[#FF3B30]/15 text-[#FF3B30] border-[#FF3B30]/40';
+  }
+  return 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50';
+}
+
 export default function StockCard({
   stock,
+  news,
+  isLoadingNews = false,
   isSaved,
   isSaving,
   onSaveWatchlist,
@@ -39,6 +63,12 @@ export default function StockCard({
 
   const isUp = stock.changePercent >= 0;
   const showSpreadWarning = stock.price < 500 && stock.lotAffordable > 10;
+
+  const rsiDisplay = `${stock.isRsiApprox ? '~' : ''}${
+    Number.isFinite(stock.rsi) ? stock.rsi.toFixed(1) : '50.0'
+  }`;
+
+  const newsItems = news?.items || [];
 
   return (
     <article className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-3.5 shadow-md">
@@ -119,7 +149,7 @@ export default function StockCard({
         />
       </div>
 
-      {/* Grid Support, Resistance, Jarak %, RSI */}
+      {/* Grid Support, Resistance (High 5H), RSI (14), Volume & Drop */}
       <div className="grid grid-cols-2 gap-2.5 text-sm">
         <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525]">
           <span className="text-[11px] text-zinc-400 block">
@@ -151,11 +181,10 @@ export default function StockCard({
 
         <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525] flex flex-col justify-between">
           <span
-            className={`font-bold text-base block ${
-              stock.checks.rsiOk ? 'text-[#00C853]' : 'text-white'
-            }`}
+            className="font-bold text-base block"
+            style={{ color: stock.checks.rsiOk ? '#00C853' : '#FFFFFF' }}
           >
-            RSI (14) : {stock.rsi.toFixed(1)}
+            RSI (14) : {rsiDisplay}
           </span>
           <span className="block text-[11px] text-zinc-400 mt-1">
             Target Mode D: 28 - 48
@@ -164,7 +193,7 @@ export default function StockCard({
 
         <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525]">
           <span className="text-[11px] text-zinc-400 block">
-            Vol & Drop 20H
+            Vol &amp; Drop 20H
           </span>
           <span
             className={`font-bold text-base ${
@@ -230,6 +259,105 @@ export default function StockCard({
         >
           {stock.checks.greenCandle ? '✓' : '✕'} Candle Hijau
         </span>
+      </div>
+
+      {/* Section Baru: Berita & Isu Terbaru */}
+      <div className="bg-[#121212] border border-[#252525] rounded-xl p-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
+            <Newspaper className="w-3.5 h-3.5 text-[#00C853]" />
+            <span>Berita &amp; Isu Terbaru</span>
+          </div>
+          {stock.newsScoreDelta !== 0 && (
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                stock.newsScoreDelta > 0
+                  ? 'bg-[#00C853]/15 text-[#00C853]'
+                  : 'bg-[#FF3B30]/15 text-[#FF3B30]'
+              }`}
+            >
+              Skor {stock.newsScoreDelta > 0 ? '+' : ''}
+              {stock.newsScoreDelta}
+            </span>
+          )}
+        </div>
+
+        {/* Peringatan Negatif / Katalis Positif 24 jam */}
+        {news?.hasNegative24h && (
+          <div className="flex items-center gap-2 bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-lg px-2.5 py-2 text-xs font-bold">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>Ada isu negatif, jangan entry dulu</span>
+          </div>
+        )}
+
+        {news?.hasPositive24h && (
+          <div className="flex items-center gap-2 bg-[#00C853]/15 border border-[#00C853]/40 text-[#00C853] rounded-lg px-2.5 py-2 text-xs font-bold">
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span>Ada katalis positif</span>
+          </div>
+        )}
+
+        {/* Daftar maks 3 berita terbaru */}
+        {isLoadingNews && !news ? (
+          <p className="text-xs text-zinc-500">Memuat berita terbaru...</p>
+        ) : newsItems.length > 0 ? (
+          <ul className="space-y-2">
+            {newsItems.slice(0, 3).map((item, idx) => (
+              <li
+                key={`${item.url || item.title}-${idx}`}
+                className="border-b border-[#222222] last:border-b-0 pb-2 last:pb-0"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  {item.url ? (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-medium text-zinc-100 hover:text-[#00C853] line-clamp-2 leading-snug flex-1"
+                    >
+                      {item.title}
+                      <ExternalLink className="inline w-3 h-3 ml-1 text-zinc-500" />
+                    </a>
+                  ) : (
+                    <p className="text-xs font-medium text-zinc-100 line-clamp-2 leading-snug flex-1">
+                      {item.title}
+                    </p>
+                  )}
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${getSentimentBadgeClass(
+                      item.sentiment
+                    )}`}
+                  >
+                    {item.sentiment}
+                  </span>
+                </div>
+                <span className="block text-[10px] text-zinc-400 mt-1">
+                  {item.source} - {formatRelativeTimeIndo(item.published_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-zinc-400">Tidak ada berita terbaru 24 jam</p>
+        )}
+
+        {/* 2 Kolom Ringkasan: Isu Internal & Isu Eksternal */}
+        <div className="pt-2 border-t border-[#222222] space-y-1.5 text-[11px]">
+          <div className="flex items-start gap-1.5 text-zinc-300">
+            <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
+            <p className="line-clamp-1">
+              <span className="text-zinc-400 font-semibold">Isu Internal: </span>
+              {news?.internalSummary || 'Belum ada isu korporasi terbaru'}
+            </p>
+          </div>
+          <div className="flex items-start gap-1.5 text-zinc-300">
+            <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
+            <p className="line-clamp-1">
+              {news?.externalSummary ||
+                'Eksternal: Pantau pergerakan IHSG & Rupiah hari ini'}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Estimasi Lot dari Modal User */}
