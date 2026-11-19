@@ -287,22 +287,26 @@ export default function ScreeningPage() {
       setRawStocks(collected);
       setLastScanDate(lastFetchedIso);
 
-      // Log validasi console langsung dari hasil calculateScore()
+      // Log validasi console langsung dari hasil calculateScore() + data Open/Close asli
       const analyzedAll = collected.map((raw) =>
         analyzeStockModeD(raw, modalNumber)
       );
       console.group(
         `[Mode D Screener] Validasi Skor (${analyzedAll.length} saham)`
       );
-      analyzedAll.forEach((s) => {
+      collected.forEach((raw, idx) => {
+        const s = analyzedAll[idx];
+        const lastC = raw.candles[raw.candles.length - 1];
+        const oVal = lastC ? Math.round(lastC.open) : s.price;
+        const cVal = lastC ? Math.round(lastC.close) : s.price;
         console.log(
           `${s.ticker} - Drop:${s.checks.isDrop ? 20 : 0} Dekat:${
             s.checks.isDekat ? 30 : 0
           } RSI:${s.checks.isRSI ? 15 : 0} (${s.rsi.toFixed(1)}) Vol:${
             s.checks.isVol ? 25 : 0
-          } Candle:${s.checks.isCandle ? 10 : 0} = Skor:${s.score} [${
-            s.scoreBreakdown
-          }]`
+          } Candle:${s.checks.isCandle ? 10 : 0} (O:${oVal} C:${cVal}) = Skor:${
+            s.score
+          } [${s.scoreBreakdown}]`
         );
       });
       console.groupEnd();
