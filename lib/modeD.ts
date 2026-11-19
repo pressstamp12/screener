@@ -1,15 +1,29 @@
-import { isSyariahTicker } from '@/data/syariah-list';
-import { Candle, ReboundLabel, ScreenedStock, StockRawData } from './types';
+import { isLq45Ticker, isSyariahTicker } from '@/data/syariah-list';
+import {
+  Candle,
+  ReboundLabel,
+  ScreenedStock,
+  StockRawData,
+  TickerNewsBundle,
+} from './types';
 
 /**
- * Hitung RSI (14) dari data close 14 hari terakhir (15 titik close = 14 perubahan harian)
+ * Hitung RSI (14) dari data close 14 hari terakhir (15 data close = 14 perubahan harian).
+ * Jika data close dari Yahoo Finance kurang dari 15 titik (< 14 hari perubahan),
+ * tetap hitung dari data yang ada dan tandai isApprox = true (tampil "~32.1").
  */
-export function calculateRSI14(closes: number[], period = 14): number {
-  if (closes.length < 2) {
-    return 50;
+export function calculateRSI14(
+  closes: number[],
+  period = 14
+): { rsi: number; isApprox: boolean } {
+  const validCloses = closes.filter((c) => Number.isFinite(c) && c > 0);
+
+  if (validCloses.length < 2) {
+    return { rsi: 50, isApprox: true };
   }
 
-  const windowCloses = closes.slice(-(period + 1));
+  const isApprox = validCloses.length < period + 1;
+  const windowCloses = validCloses.slice(-(period + 1));
   const changesCount = windowCloses.length - 1;
 
   let gains = 0;
@@ -27,10 +41,16 @@ export function calculateRSI14(closes: number[], period = 14): number {
   const avgGain = gains / changesCount;
   const avgLoss = losses / changesCount;
 
-  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  if (avgLoss === 0) {
+    return { rsi: avgGain === 0 ? 50 : 100, isApprox };
+  }
+
   const rs = avgGain / avgLoss;
   const rsi = 100 - 100 / (1 + rs);
-  return Number(rsi.toFixed(1));
+  return {
+    rsi: Number.isFinite(rsi) ? Number(rsi.toFixed(1)) : 50,
+    isApprox,
+  };
 }
 
 /**
@@ -55,7 +75,7 @@ export function findSupport20(candles: Candle[]): {
   const sortedUniqueLows = Array.from(new Set(lows)).sort((a, b) => a - b);
 
   for (const candidate of sortedUniqueLows) {
-    const tolerance = candidate * 0.025; // zona uji 2.5%
+    const tolerance = candidate * 0.025;
     const touches = recent20.filter(
       (c) => c.low >= candidate - tolerance && c.low <= candidate + tolerance
     ).length;
@@ -74,13 +94,14 @@ export function findSupport20(candles: Candle[]): {
 }
 
 /**
- * Analisa lengkap satu saham menggunakan aturan Mode D Screener
+ * Analisa lengkap satu saham menggunakan aturan Mode D Screener + sentimen berita (opsional)
  */
 export function analyzeStockModeD(
   raw: StockRawData,
-  modalUser: number
+  modalUser: number,
+  newsBundle?: TickerNewsBundle
 ): ScreenedStock {
-  const candles = raw.candles;
+  const candles = raw.candles || [];
   const lastCandle = candles[candles.length - 1];
   const prevCandle =
     candles.length >= 2 ? candles[candles.length - 2] : lastCandle;
@@ -95,10 +116,10 @@ export function analyzeStockModeD(
   const last20 = candles.slice(-20);
   const last5 = candles.slice(-5);
 
-  // High 20 hari tetap dipakai untuk hitung Drop dari High 20H
+  // High 20 hari dipakai untuk hitung Drop dari High 20H
   const high20 = Math.round(Math.max(...last20.map((c) => c.high), price));
 
-  // Resistance terdekat = High tertinggi 5 hari terakhir
+  // Resistance terdekat = High 5 hari terakhir
   const resistance = Math.round(Math.max(...last5.map((c) => c.high), price));
 
   // Support = Low terendah 20 hari yang sudah diuji minimal 3x
@@ -117,9 +138,9 @@ export function analyzeStockModeD(
       ? Number((((resistance - price) / price) * 100).toFixed(1))
       : 0;
 
-  // Hitung RSI 14 dari data close 14 hari terakhir (15 data close = 14 perubahan harian)
+  // Hitung RSI (14) dari data close 14 hari terakhir (fallback data yang tersedia -> "~")
   const closes14 = candles.slice(-15).map((c) => c.close);
-  const rsi = calculateRSI14(closes14, 14);
+  const { rsi, isApprox: isRsiApprox } = calculateRSI14(closes14, 14);
 
   // Volume hari ini vs rata-rata 20 hari
   const volumeToday = lastCandle?.volume || 0;
@@ -140,16 +161,20 @@ export function analyzeStockModeD(
   const volumeOk = volumeRatio > 1.2;
   const allModeD = dropOk && supportOk && rsiOk && volumeOk;
 
-  // Skor Rebound (0 - 100) sesuai checklist:
+  // Skor teknikal (0 - 100):
   // Drop >8% (+20) + Dekat Support <4% (+30) + Vol >1.2x (+25) + Candle Hijau (+10) + RSI 28-48 (+15)
-  const score =
+  const baseScore =
     (dropOk ? 20 : 0) +
     (supportOk ? 30 : 0) +
     (volumeOk ? 25 : 0) +
     (isGreenCandle ? 10 : 0) +
     (rsiOk ? 15 : 0);
 
-  // Label: < 60 tidak boleh POTENSI REBOUND (otomatis TUNGGU / SKIP)
+  // Pengaruh berita 24 jam terakhir (-15 negatif, +10 positif), clamp 0 - 100
+  const newsScoreDelta = newsBundle?.scoreDelta ?? 0;
+  const score = Math.max(0, Math.min(100, baseScore + newsScoreDelta));
+
+  // Label otomatis: < 60 tidak boleh POTENSI REBOUND
   let label: ReboundLabel = 'SKIP';
   if (score >= 60) {
     label = 'POTENSI REBOUND';
@@ -167,6 +192,7 @@ export function analyzeStockModeD(
     ticker: raw.ticker,
     name: raw.name,
     isSyariah: isSyariahTicker(raw.ticker),
+    isLq45: isLq45Ticker(raw.ticker),
     price,
     prevClose,
     changePercent,
@@ -177,10 +203,13 @@ export function analyzeStockModeD(
     distToResistance,
     dropFromHigh20,
     rsi,
+    isRsiApprox,
     volumeToday,
     avgVolume20: Math.round(avgVolume20),
     volumeRatio,
     isGreenCandle,
+    baseScore,
+    newsScoreDelta,
     score,
     label,
     lotAffordable,
