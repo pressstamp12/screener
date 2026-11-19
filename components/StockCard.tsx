@@ -12,7 +12,6 @@ import {
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
-import { calculateScore } from '@/lib/modeD';
 import { NewsSentiment, ScreenedStock, TickerNewsBundle } from '@/lib/types';
 import {
   formatPercent,
@@ -48,14 +47,8 @@ export default function StockCard({
   isSaving,
   onSaveWatchlist,
 }: StockCardProps) {
-  // Hitung skor, label, & checklist dari 1 fungsi tunggal calculateScore()
-  const { checks, score, label } = calculateScore({
-    dropPercent: Number((-stock.dropFromHigh20).toFixed(1)),
-    distToSupport: stock.distToSupport,
-    rsi: stock.rsi,
-    volumeRatio: stock.volumeRatio,
-    isGreenCandle: stock.isGreenCandle,
-  });
+  // Pakai langsung hasil calculateScore() tanpa menghitung ulang di komponen card
+  const { checks, score, scoreBreakdown, label } = stock;
 
   const labelStyle =
     label === 'POTENSI REBOUND'
@@ -64,10 +57,17 @@ export default function StockCard({
       ? 'bg-[#FFB300]/15 text-[#FFB300] border-[#FFB300]/40'
       : 'bg-[#FF3B30]/15 text-[#FF3B30] border-[#FF3B30]/40';
 
+  const scoreTextColor =
+    label === 'POTENSI REBOUND'
+      ? 'text-[#00C853]'
+      : label === 'TUNGGU'
+      ? 'text-[#FFB300]'
+      : 'text-[#FF3B30]';
+
   const scoreBarColor =
-    score >= 60
+    label === 'POTENSI REBOUND'
       ? 'bg-[#00C853]'
-      : score >= 40
+      : label === 'TUNGGU'
       ? 'bg-[#FFB300]'
       : 'bg-[#FF3B30]';
 
@@ -111,7 +111,7 @@ export default function StockCard({
         </span>
       </div>
 
-      {/* Harga & Naik/Turun + Skor Rebound */}
+      {/* Harga & Naik/Turun + Skor Rebound + Debug Breakdown */}
       <div className="flex items-end justify-between bg-[#121212] rounded-xl p-3 border border-[#242424]">
         <div>
           <span className="text-[11px] text-zinc-400 block">Harga Terakhir</span>
@@ -136,17 +136,12 @@ export default function StockCard({
 
         <div className="text-right">
           <span className="text-[11px] text-zinc-400 block">Skor Rebound</span>
-          <span
-            className={`text-2xl font-black ${
-              score >= 60
-                ? 'text-[#00C853]'
-                : score >= 40
-                ? 'text-[#FFB300]'
-                : 'text-[#FF3B30]'
-            }`}
-          >
+          <span className={`text-2xl font-black block leading-tight ${scoreTextColor}`}>
             {score}
             <span className="text-xs font-normal text-zinc-500">/100</span>
+          </span>
+          <span className="block text-[10px] font-mono text-zinc-400 mt-0.5">
+            {scoreBreakdown}
           </span>
         </div>
       </div>
@@ -170,7 +165,7 @@ export default function StockCard({
           </span>
           <span
             className={`block text-xs font-semibold mt-0.5 ${
-              checks.supportOk ? 'text-[#00C853]' : 'text-zinc-400'
+              checks.isDekat ? 'text-[#00C853]' : 'text-zinc-400'
             }`}
           >
             Jarak: {formatPercent(stock.distToSupport)}
@@ -192,7 +187,7 @@ export default function StockCard({
         <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525] flex flex-col justify-between">
           <span
             className="font-bold text-base block"
-            style={{ color: checks.rsiOk ? '#00C853' : '#FFFFFF' }}
+            style={{ color: checks.isRSI ? '#00C853' : '#FFFFFF' }}
           >
             RSI (14) : {rsiDisplay}
           </span>
@@ -207,14 +202,14 @@ export default function StockCard({
           </span>
           <span
             className={`font-bold text-base ${
-              checks.volumeOk ? 'text-[#00C853]' : 'text-white'
+              checks.isVol ? 'text-[#00C853]' : 'text-white'
             }`}
           >
             {stock.volumeRatio}x Vol
           </span>
           <span
             className={`block text-[11px] ${
-              checks.dropOk ? 'text-[#00C853]' : 'text-zinc-400'
+              checks.isDrop ? 'text-[#00C853]' : 'text-zinc-400'
             }`}
           >
             Dari High: {stock.dropFromHigh20}%
@@ -222,63 +217,62 @@ export default function StockCard({
         </div>
       </div>
 
-      {/* Indikator Checklist Mode D (100% sinkron dengan calculateScore) */}
+      {/* Indikator Checklist Mode D (langsung pakai 5 boolean dari calculateScore) */}
       <div className="flex flex-wrap gap-1.5 text-[11px]">
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            checks.dropOk
+            checks.isDrop
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {checks.dropOk ? '✓' : '✕'} Drop &gt;8%
+          {checks.isDrop ? '✓' : '✕'} Drop &gt;8%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            checks.supportOk
+            checks.isDekat
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {checks.supportOk ? '✓' : '✕'} Dekat Support ≤4%
+          {checks.isDekat ? '✓' : '✕'} Dekat Support ≤4%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            checks.rsiOk
+            checks.isRSI
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {checks.rsiOk ? '✓' : '✕'} RSI 28-48
+          {checks.isRSI ? '✓' : '✕'} RSI 28-48
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            checks.volumeOk
+            checks.isVol
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {checks.volumeOk ? '✓' : '✕'} Vol &gt;1.2x
+          {checks.isVol ? '✓' : '✕'} Vol &gt;1.2x
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
-            checks.greenCandle
+            checks.isCandle
               ? 'bg-[#00C853]/15 text-[#00C853]'
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {checks.greenCandle ? '✓' : '✕'} Candle Hijau
+          {checks.isCandle ? '✓' : '✕'} Candle Hijau
         </span>
       </div>
 
-      {/* Section Berita & Isu Terbaru (hanya berita <= 7 hari, terpisah dari skor) */}
+      {/* Section Berita & Isu Terbaru */}
       <div className="bg-[#121212] border border-[#252525] rounded-xl p-3 space-y-2.5">
         <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
           <Newspaper className="w-3.5 h-3.5 text-[#00C853]" />
           <span>Berita &amp; Isu Terbaru</span>
         </div>
 
-        {/* Peringatan Negatif / Info Katalis Positif 24 Jam */}
         {news?.hasNegative24h && (
           <div className="flex items-center gap-2 bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-lg px-2.5 py-2 text-xs font-bold">
             <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -293,7 +287,6 @@ export default function StockCard({
           </div>
         )}
 
-        {/* Maks 3 berita fresh (<= 7 hari) */}
         {isLoadingNews && !news ? (
           <p className="text-xs text-zinc-500">Memuat berita terbaru...</p>
         ) : newsItems.length > 0 ? (
@@ -337,7 +330,6 @@ export default function StockCard({
           <p className="text-xs text-zinc-400">Tidak ada berita terbaru 7 hari</p>
         )}
 
-        {/* 1 Baris Isu Internal & 1 Baris Isu Eksternal per Sektor */}
         <div className="pt-2 border-t border-[#222222] space-y-1.5 text-[11px]">
           <div className="flex items-start gap-1.5 text-zinc-300">
             <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
@@ -378,7 +370,6 @@ export default function StockCard({
         </div>
       </div>
 
-      {/* Peringatan risiko spread untuk saham harga < 500 dengan lot > 10 */}
       {showSpreadWarning && (
         <div className="flex items-center gap-2 bg-[#FFB300]/15 border border-[#FFB300]/40 text-[#FFB300] rounded-xl px-3 py-2 text-xs font-semibold">
           <AlertTriangle className="w-4 h-4 shrink-0" />
