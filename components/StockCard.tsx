@@ -212,7 +212,7 @@ export default function StockCard({
         </div>
       </div>
 
-      {/* Indikator Checklist Mode D (Skor murni dari 5 item ini) */}
+      {/* Indikator Checklist Mode D (100% sinkron dengan calculateScore) */}
       <div className="flex flex-wrap gap-1.5 text-[11px]">
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
@@ -261,14 +261,14 @@ export default function StockCard({
         </span>
       </div>
 
-      {/* Section Berita & Isu Terbaru (Terpisah dari Skor Utama) */}
+      {/* Section Berita & Isu Terbaru (hanya berita <= 7 hari, terpisah dari skor) */}
       <div className="bg-[#121212] border border-[#252525] rounded-xl p-3 space-y-2.5">
         <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
           <Newspaper className="w-3.5 h-3.5 text-[#00C853]" />
           <span>Berita &amp; Isu Terbaru</span>
         </div>
 
-        {/* Peringatan Negatif / Info Katalis Positif 24 Jam (Terpisah dari Skor) */}
+        {/* Peringatan Negatif / Info Katalis Positif 24 Jam */}
         {news?.hasNegative24h && (
           <div className="flex items-center gap-2 bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-lg px-2.5 py-2 text-xs font-bold">
             <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -283,7 +283,7 @@ export default function StockCard({
           </div>
         )}
 
-        {/* Daftar maks 3 berita terbaru */}
+        {/* Maks 3 berita fresh (<= 7 hari) */}
         {isLoadingNews && !news ? (
           <p className="text-xs text-zinc-500">Memuat berita terbaru...</p>
         ) : newsItems.length > 0 ? (
@@ -324,24 +324,23 @@ export default function StockCard({
             ))}
           </ul>
         ) : (
-          <p className="text-xs text-zinc-400">Tidak ada berita terbaru 24 jam</p>
+          <p className="text-xs text-zinc-400">Tidak ada berita terbaru 7 hari</p>
         )}
 
-        {/* 1 Baris Isu Internal & 1 Baris Isu Eksternal */}
+        {/* 1 Baris Isu Internal & 1 Baris Isu Eksternal per Sektor */}
         <div className="pt-2 border-t border-[#222222] space-y-1.5 text-[11px]">
           <div className="flex items-start gap-1.5 text-zinc-300">
             <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
             <p className="line-clamp-1">
               <span className="text-zinc-400 font-semibold">Isu Internal: </span>
-              {news?.internalSummary || 'Belum ada isu korporasi terbaru'}
+              {news?.internalSummary || 'Tidak ada isu korporasi 7 hari terakhir'}
             </p>
           </div>
           <div className="flex items-start gap-1.5 text-zinc-300">
             <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
             <p className="line-clamp-1">
               <span className="text-zinc-400 font-semibold">Isu Eksternal: </span>
-              {news?.externalSummary ||
-                'Pantau pergerakan BI Rate, IHSG & Rupiah hari ini'}
+              {news?.externalSummary || 'IHSG & BI Rate - Pantau sentimen pasar'}
             </p>
           </div>
         </div>
