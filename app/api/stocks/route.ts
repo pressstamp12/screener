@@ -21,7 +21,6 @@ const BROWSER_HEADERS = {
   Origin: 'https://finance.yahoo.com',
 };
 
-// Cache singkat 3 menit di memory server agar tidak kena rate-limit saat scan ulang
 const CACHE_TTL_MS = 3 * 60 * 1000;
 const stockCache = new Map<string, { data: StockRawData; expiresAt: number }>();
 
@@ -52,7 +51,7 @@ async function getYahooSessionCookie(): Promise<string> {
         redirect: 'manual',
         headers: { 'User-Agent': BROWSER_HEADERS['User-Agent'] },
       },
-      4000
+      3500
     );
     const setCookie = res.headers.get('set-cookie');
     if (!setCookie) return '';
@@ -93,7 +92,7 @@ async function fetchYahooStock(
       });
 
       if (res.status === 429) {
-        await sleep(500);
+        await sleep(400);
         throw new Error('HTTP 429 (Rate limit Yahoo Finance)');
       }
 
@@ -142,7 +141,7 @@ async function fetchYahooStock(
         }
       }
 
-      if (candles.length < 5) {
+      if (candles.length < 2) {
         throw new Error(`Histori candle terlalu sedikit untuk ${cleanTicker}`);
       }
 
@@ -188,18 +187,18 @@ export async function GET(request: NextRequest) {
         .split(',')
         .map((t) => t.replace(/\.JK$/i, '').trim().toUpperCase())
         .filter(Boolean)
-    : DEFAULT_WATCHLIST;
+    : DEFAULT_WATCHLIST.slice(0, 10);
 
-  const uniqueTickers = Array.from(new Set(tickers)).slice(0, 30);
+  // Batasi maksimal 15 ticker per panggilan agar aman dari timeout Vercel
+  const uniqueTickers = Array.from(new Set(tickers)).slice(0, 15);
   const cookie = await getYahooSessionCookie();
 
   const stocks: StockRawData[] = [];
   const errors: { ticker: string; message: string }[] = [];
 
-  // Proses per 3 saham agar tidak memicu rate-limit Yahoo Finance
-  const BATCH_SIZE = 3;
-  for (let i = 0; i < uniqueTickers.length; i += BATCH_SIZE) {
-    const batch = uniqueTickers.slice(i, i + BATCH_SIZE);
+  const SUB_BATCH_SIZE = 5;
+  for (let i = 0; i < uniqueTickers.length; i += SUB_BATCH_SIZE) {
+    const batch = uniqueTickers.slice(i, i + SUB_BATCH_SIZE);
     const settled = await Promise.allSettled(
       batch.map((ticker) => fetchYahooStock(ticker, cookie))
     );
@@ -215,8 +214,8 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    if (i + BATCH_SIZE < uniqueTickers.length) {
-      await sleep(300);
+    if (i + SUB_BATCH_SIZE < uniqueTickers.length) {
+      await sleep(200);
     }
   }
 
