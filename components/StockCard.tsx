@@ -1,6 +1,12 @@
 'use client';
 
-import { BookmarkPlus, Check, TrendingUp, TrendingDown } from 'lucide-react';
+import {
+  AlertTriangle,
+  BookmarkPlus,
+  Check,
+  TrendingUp,
+  TrendingDown,
+} from 'lucide-react';
 import { ScreenedStock } from '@/lib/types';
 import { formatPercent, formatPrice, formatRupiah } from '@/lib/format';
 
@@ -25,13 +31,14 @@ export default function StockCard({
       : 'bg-[#FF3B30]/15 text-[#FF3B30] border-[#FF3B30]/40';
 
   const scoreBarColor =
-    stock.score >= 70
+    stock.score >= 60
       ? 'bg-[#00C853]'
       : stock.score >= 40
       ? 'bg-[#FFB300]'
       : 'bg-[#FF3B30]';
 
   const isUp = stock.changePercent >= 0;
+  const showSpreadWarning = stock.price < 500 && stock.lotAffordable > 10;
 
   return (
     <article className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-3.5 shadow-md">
@@ -91,7 +98,7 @@ export default function StockCard({
           <span className="text-[11px] text-zinc-400 block">Skor Rebound</span>
           <span
             className={`text-2xl font-black ${
-              stock.score >= 70
+              stock.score >= 60
                 ? 'text-[#00C853]'
                 : stock.score >= 40
                 ? 'text-[#FFB300]'
@@ -132,7 +139,7 @@ export default function StockCard({
 
         <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525]">
           <span className="text-[11px] text-zinc-400 block">
-            Resistance (High 20H)
+            Resistance (High 5H)
           </span>
           <span className="font-bold text-white text-base">
             {formatPrice(stock.resistance)}
@@ -142,16 +149,15 @@ export default function StockCard({
           </span>
         </div>
 
-        <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525]">
-          <span className="text-[11px] text-zinc-400 block">RSI (14)</span>
+        <div className="bg-[#141414] rounded-xl p-2.5 border border-[#252525] flex flex-col justify-between">
           <span
-            className={`font-bold text-base ${
+            className={`font-bold text-base block ${
               stock.checks.rsiOk ? 'text-[#00C853]' : 'text-white'
             }`}
           >
-            {stock.rsi}
+            RSI (14) : {stock.rsi.toFixed(1)}
           </span>
-          <span className="block text-[11px] text-zinc-400">
+          <span className="block text-[11px] text-zinc-400 mt-1">
             Target Mode D: 28 - 48
           </span>
         </div>
@@ -186,7 +192,7 @@ export default function StockCard({
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.dropOk ? '✓' : '✕'} Drop ≥8%
+          {stock.checks.dropOk ? '✓' : '✕'} Drop &gt;8%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
@@ -195,7 +201,7 @@ export default function StockCard({
               : 'bg-zinc-800 text-zinc-400'
           }`}
         >
-          {stock.checks.supportOk ? '✓' : '✕'} Dekat Support ≤4%
+          {stock.checks.supportOk ? '✓' : '✕'} Dekat Support &lt;4%
         </span>
         <span
           className={`px-2 py-1 rounded-lg font-medium ${
@@ -247,6 +253,14 @@ export default function StockCard({
           </span>
         </div>
       </div>
+
+      {/* Peringatan risiko spread untuk saham harga < 500 dengan lot > 10 */}
+      {showSpreadWarning && (
+        <div className="flex items-center gap-2 bg-[#FFB300]/15 border border-[#FFB300]/40 text-[#FFB300] rounded-xl px-3 py-2 text-xs font-semibold">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Lot besar, risiko spread tinggi</span>
+        </div>
+      )}
 
       {/* Tombol Simpan ke Watchlist */}
       <button
