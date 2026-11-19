@@ -156,10 +156,15 @@ const NEGATIVE_KEYWORDS = [
   'gugatan',
   'penurunan laba',
   'kinerja turun',
+  'sentuh arb',
+  'auto reject bawah',
+  'auto rejection bawah',
+  'mentok bawah',
+  'arb berjilid',
 ];
 
-// Singkatan pendek dicocokkan per batas kata agar tidak keliru ("perumahan" != "UMA")
-const NEGATIVE_WORD_REGEXES = [/\buma\b/i, /\bphk\b/i];
+// Singkatan pendek dicocokkan per batas kata agar "terbaru"/"perumahan" tidak keliru
+const NEGATIVE_WORD_REGEXES = [/\barb\b/i, /\buma\b/i, /\bphk\b/i];
 
 const INTERNAL_HINTS = [
   'laporan keuangan',
@@ -198,7 +203,6 @@ export function isFreshNews(publishedAt: string, maxDays = MAX_NEWS_AGE_DAYS): b
   const ts = new Date(publishedAt).getTime();
   if (Number.isNaN(ts)) return false;
   const ageMs = Date.now() - ts;
-  // Izinkan sedikit selisih timezone (+12 jam ke depan) tapi wajib <= maxDays ke belakang
   return ageMs <= maxDays * 24 * 60 * 60 * 1000 && ageMs >= -12 * 60 * 60 * 1000;
 }
 
@@ -211,7 +215,7 @@ export function isWithin24Hours(publishedAt: string): boolean {
 
 /**
  * Klasifikasi sentimen dari judul + snippet berita:
- * - Ada kata NEGATIF => NEGATIF
+ * - Ada kata NEGATIF (termasuk ARB) => NEGATIF
  * - Ada kata POSITIF & tidak ada NEGATIF => POSITIF
  * - Tidak ada keduanya => NETRAL
  */
@@ -238,7 +242,6 @@ export function isTickerRelevantNews(
   const clean = ticker.replace(/\.JK$/i, '').trim().toUpperCase();
   const combined = `${title} ${snippet}`.toLowerCase();
 
-  // Buang halaman profil statis BEI/IDX yang bukan berita
   if (combined.includes('profil perusahaan tercatat')) return false;
 
   const keywords = getCompanyKeywords(clean);
@@ -268,16 +271,11 @@ function truncateText(text: string, maxLen = 68): string {
   return `${clean.slice(0, maxLen - 1).trim()}…`;
 }
 
-/**
- * Susun daftar maks 3 berita fresh (<= 7 hari, urut terbaru),
- * 1 baris Isu Internal, dan 1 baris Isu Eksternal khusus sektor ticker.
- */
 export function buildTickerNewsBundle(
   ticker: string,
   tickerItems: StockNewsItem[],
   sectorMacroItems: StockNewsItem[]
 ): TickerNewsBundle {
-  // Filter ketat hanya berita <= 7 hari dan urutkan dari paling baru ke paling lama
   const freshSorted = tickerItems
     .filter((item) => isFreshNews(item.published_at, MAX_NEWS_AGE_DAYS))
     .sort(
@@ -300,7 +298,6 @@ export function buildTickerNewsBundle(
       )})`
     : null;
 
-  // Isu Eksternal khusus sektor (hanya berita makro fresh <= 7 hari yang cocok keyword sektor)
   const sectorKey = getExternalSectorKey(ticker);
   const sectorCfg = SECTOR_CONFIGS[sectorKey];
 
