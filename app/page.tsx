@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { DEFAULT_WATCHLIST, isSyariahTicker } from '@/data/syariah-list';
-import { analyzeStockModeD } from '@/lib/modeD';
+import { analyzeStockModeD, formatScoreAuditLog } from '@/lib/modeD';
 import { formatDateIndo, formatRupiah, getTodayISO } from '@/lib/format';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
@@ -153,7 +153,7 @@ export default function ScreeningPage() {
       : { min: 100, max: 3500 };
   };
 
-  // Analisa Mode D murni teknikal (skor tidak terpengaruh berita)
+  // Analisa Mode D murni teknikal dari calculateScore()
   const screenedList: ScreenedStock[] = useMemo(() => {
     const { min, max } = getPriceBounds();
 
@@ -298,6 +298,18 @@ export default function ScreeningPage() {
       setRawStocks(collected);
       setLastScanDate(lastFetchedIso);
 
+      // Validasi otomatis di console untuk setiap saham hasil scan
+      const analyzedAll = collected.map((raw) =>
+        analyzeStockModeD(raw, modalNumber)
+      );
+      console.group(
+        `[Mode D Screener] Validasi Skor (${analyzedAll.length} saham)`
+      );
+      analyzedAll.forEach((stock) => {
+        console.log(formatScoreAuditLog(stock));
+      });
+      console.groupEnd();
+
       try {
         localStorage.setItem(
           'modeD_last_raw_stocks',
@@ -312,14 +324,12 @@ export default function ScreeningPage() {
         const today = getTodayISO();
         const { min, max } = getPriceBounds();
 
-        const analyzedForDb = collected
-          .map((raw) => analyzeStockModeD(raw, modalNumber))
-          .filter((s) => {
-            if (s.price < min || s.price > max) return false;
-            if (syariahFilter === 'syariah' && !s.isSyariah) return false;
-            if (syariahFilter === 'non_syariah' && s.isSyariah) return false;
-            return true;
-          });
+        const analyzedForDb = analyzedAll.filter((s) => {
+          if (s.price < min || s.price > max) return false;
+          if (syariahFilter === 'syariah' && !s.isSyariah) return false;
+          if (syariahFilter === 'non_syariah' && s.isSyariah) return false;
+          return true;
+        });
 
         if (analyzedForDb.length > 0) {
           const rows = analyzedForDb.map((s) => ({
