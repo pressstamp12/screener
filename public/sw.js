@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mode-d-screener-v1';
+const CACHE_NAME = 'mode-d-screener-v3';
 const APP_SHELL = [
   '/',
   '/watchlist',
@@ -36,7 +36,7 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Jangan cache panggilan API live / Supabase
+  // Jangan pernah cache panggilan API live / Supabase
   if (url.pathname.startsWith('/api/') || url.hostname.includes('supabase.co')) {
     event.respondWith(
       fetch(request).catch(() => {
@@ -52,37 +52,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigasi halaman: Network-first, fallback ke cache
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
+  // Network-first untuk HTML & semua bundle Next.js agar deploy baru langsung muncul
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        if (response && response.status === 200 && url.origin === self.location.origin) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(request);
-          return cached || (await caches.match('/'));
-        })
-    );
-    return;
-  }
-
-  // Aset statis: Stale-while-revalidate
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      const networkFetch = fetch(request)
-        .then((response) => {
-          if (response && response.status === 200 && url.origin === self.location.origin) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || networkFetch;
-    })
+        }
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        if (request.mode === 'navigate') {
+          return caches.match('/');
+        }
+        return new Response('', { status: 503 });
+      })
   );
 });
