@@ -37,7 +37,8 @@ export interface ScoreResult {
 
 /**
  * SATU-SATUNYA FUNGSI SKOR & CHECKLIST DI SELURUH APLIKASI.
- * 5 boolean dihitung dulu, lalu skor & breakdown dihitung dari 5 boolean yang sama.
+ * Definisi Candle Hijau final: Close hari ini > Open hari ini (BUKAN Close > Prev Close).
+ * 5 boolean dihitung 1x lalu dipakai langsung untuk checklist UI, skor, dan breakdown.
  */
 export function calculateScore(input: ScoreInput): ScoreResult {
   const isDrop = Number.isFinite(input.drop) && input.drop > 8;
@@ -83,7 +84,7 @@ export function calculateScore(input: ScoreInput): ScoreResult {
 
 /**
  * Hitung RSI (14) dari data close 14 hari terakhir (15 data close = 14 perubahan).
- * Mengembalikan nilai float ASLI tanpa dibulatkan agar cek range 28 <= rsi <= 48 akurat.
+ * Mengembalikan nilai float ASLI tanpa pembulatan agar cek range 28 <= rsi <= 48 akurat.
  */
 export function calculateRSI14(
   closes: number[],
@@ -166,7 +167,7 @@ export function findSupport20(candles: Candle[]): {
 }
 
 /**
- * Analisa lengkap satu saham. Semua skor & checklist wajib berasal dari calculateScore().
+ * Analisa lengkap satu saham. Semua skor & checklist berasal dari calculateScore().
  */
 export function analyzeStockModeD(
   raw: StockRawData,
@@ -194,7 +195,6 @@ export function analyzeStockModeD(
   const { support: rawSupport, tests: supportTests } = findSupport20(candles);
   const support = rawSupport > 0 ? rawSupport : Math.round(price * 0.95);
 
-  // Drop & Jarak Support
   const dropPercent =
     high20 > 0 ? Number((((high20 - price) / high20) * 100).toFixed(1)) : 0;
   const dropFromHigh20 = dropPercent === 0 ? 0 : Number((-dropPercent).toFixed(1));
@@ -207,7 +207,7 @@ export function analyzeStockModeD(
       ? Number((((resistance - price) / price) * 100).toFixed(1))
       : 0;
 
-  // RSI 14 float asli (tanpa pembulatan sebelum masuk calculateScore)
+  // RSI 14 float asli
   const closes14 = candles.slice(-15).map((c) => c.close);
   const { rsi: rsiRaw, isApprox: isRsiApprox } = calculateRSI14(closes14, 14);
 
@@ -220,9 +220,9 @@ export function analyzeStockModeD(
   const volumeRatio =
     avgVolume20 > 0 ? Number((volumeToday / avgVolume20).toFixed(2)) : 0;
 
-  // Close & Open candle terakhir
-  const closeToday = lastCandle ? Number(lastCandle.close) : price;
+  // Open & Close candle hari ini (BUKAN prevClose)
   const openToday = lastCandle ? Number(lastCandle.open) : price;
+  const closeToday = lastCandle ? Number(lastCandle.close) : price;
 
   // Panggil SATU-SATUNYA fungsi skor
   const { checks, score, scoreBreakdown, label } = calculateScore({
@@ -234,7 +234,6 @@ export function analyzeStockModeD(
     open: openToday,
   });
 
-  // Lot berdasarkan modal user
   const costPerLot = price * 100;
   const lotAffordable =
     costPerLot > 0 && modalUser > 0 ? Math.floor(modalUser / costPerLot) : 0;
