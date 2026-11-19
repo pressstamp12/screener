@@ -2,18 +2,21 @@ import { isSyariahTicker } from '@/data/syariah-list';
 import { Candle, ReboundLabel, ScreenedStock, StockRawData } from './types';
 
 /**
- * Hitung RSI 14 (Wilder's Smoothing) dari array harga close minimal 15-30 hari
+ * Hitung RSI (14) dari data close 14 hari terakhir (15 titik close = 14 perubahan harian)
  */
 export function calculateRSI14(closes: number[], period = 14): number {
-  if (closes.length < period + 1) {
+  if (closes.length < 2) {
     return 50;
   }
+
+  const windowCloses = closes.slice(-(period + 1));
+  const changesCount = windowCloses.length - 1;
 
   let gains = 0;
   let losses = 0;
 
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
+  for (let i = 1; i < windowCloses.length; i++) {
+    const diff = windowCloses[i] - windowCloses[i - 1];
     if (diff >= 0) {
       gains += diff;
     } else {
@@ -21,28 +24,19 @@ export function calculateRSI14(closes: number[], period = 14): number {
     }
   }
 
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
+  const avgGain = gains / changesCount;
+  const avgLoss = losses / changesCount;
 
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? Math.abs(diff) : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-  }
-
-  if (avgLoss === 0) return 100;
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
   const rs = avgGain / avgLoss;
   const rsi = 100 - 100 / (1 + rs);
   return Number(rsi.toFixed(1));
 }
 
 /**
- * Cari Support 20 hari: Low terendah dalam 20 hari perdagangan yang sudah diuji minimal 2x
- * (dalam toleransi 2.5% dari titik low tersebut). Jika belum ada yang tersentuh 2x,
- * fallback ke Low terendah 20 hari.
+ * Cari Support 20 hari: Low terendah dalam 20 hari perdagangan yang sudah diuji minimal 3x
+ * (dalam toleransi 2.5% dari titik low tersebut). Jika belum ada yang tersentuh 3x,
+ * fallback ke Low terendah 20 hari beserta jumlah ujinya.
  */
 export function findSupport20(candles: Candle[]): {
   support: number;
@@ -66,13 +60,17 @@ export function findSupport20(candles: Candle[]): {
       (c) => c.low >= candidate - tolerance && c.low <= candidate + tolerance
     ).length;
 
-    if (touches >= 2) {
+    if (touches >= 3) {
       return { support: Math.round(candidate), tests: touches };
     }
   }
 
   const lowest = Math.min(...lows);
-  return { support: Math.round(lowest), tests: 1 };
+  const tolerance = lowest * 0.025;
+  const lowestTouches = recent20.filter(
+    (c) => c.low >= lowest - tolerance && c.low <= lowest + tolerance
+  ).length;
+  return { support: Math.round(lowest), tests: Math.max(1, lowestTouches) };
 }
 
 /**
@@ -90,17 +88,20 @@ export function analyzeStockModeD(
   const price = Math.round(raw.price || lastCandle?.close || 0);
   const prevClose = Math.round(raw.prevClose || prevCandle?.close || price);
   const changePercent =
-    prevClose > 0 ? Number((((price - prevClose) / prevClose) * 100).toFixed(2)) : 0;
+    prevClose > 0
+      ? Number((((price - prevClose) / prevClose) * 100).toFixed(2))
+      : 0;
 
   const last20 = candles.slice(-20);
-  const last30Plus = candles.slice(-40); // ambil hingga 40 hari agar RSI-14 akurat
+  const last5 = candles.slice(-5);
 
-  // Resistance = High tertinggi 20 hari
-  const high20 = Math.round(
-    Math.max(...last20.map((c) => c.high), price)
-  );
+  // High 20 hari tetap dipakai untuk hitung Drop dari High 20H
+  const high20 = Math.round(Math.max(...last20.map((c) => c.high), price));
 
-  // Support = Low terendah 20 hari yang sudah diuji minimal 2x
+  // Resistance terdekat = High tertinggi 5 hari terakhir
+  const resistance = Math.round(Math.max(...last5.map((c) => c.high), price));
+
+  // Support = Low terendah 20 hari yang sudah diuji minimal 3x
   const { support: rawSupport, tests: supportTests } = findSupport20(candles);
   const support = rawSupport > 0 ? rawSupport : Math.round(price * 0.95);
 
@@ -108,15 +109,17 @@ export function analyzeStockModeD(
   const dropFromHigh20 =
     high20 > 0 ? Number((((price - high20) / high20) * 100).toFixed(1)) : 0;
 
-  // Jarak harga ke Support & Resistance (%)
+  // Jarak harga ke Support & Upside ke Resistance (High 5H) (%)
   const distToSupport =
     support > 0 ? Number((((price - support) / support) * 100).toFixed(1)) : 0;
   const distToResistance =
-    price > 0 ? Number((((high20 - price) / price) * 100).toFixed(1)) : 0;
+    price > 0
+      ? Number((((resistance - price) / price) * 100).toFixed(1))
+      : 0;
 
-  // Hitung RSI 14 di frontend dari data close 30+ hari
-  const closes = last30Plus.map((c) => c.close);
-  const rsi = calculateRSI14(closes, 14);
+  // Hitung RSI 14 dari data close 14 hari terakhir (15 data close = 14 perubahan harian)
+  const closes14 = candles.slice(-15).map((c) => c.close);
+  const rsi = calculateRSI14(closes14, 14);
 
   // Volume hari ini vs rata-rata 20 hari
   const volumeToday = lastCandle?.volume || 0;
@@ -130,23 +133,25 @@ export function analyzeStockModeD(
   // Candle hijau terakhir (close > open)
   const isGreenCandle = lastCandle ? lastCandle.close > lastCandle.open : false;
 
-  // Filter Mode D (4 syarat teknikal + range harga diterapkan di UI)
-  const dropOk = dropFromHigh20 <= -8;
-  const supportOk = distToSupport >= 0 && distToSupport <= 4;
+  // Checklist syarat Mode D
+  const dropOk = dropFromHigh20 < -8;
+  const supportOk = distToSupport >= 0 && distToSupport < 4;
   const rsiOk = rsi >= 28 && rsi <= 48;
   const volumeOk = volumeRatio > 1.2;
   const allModeD = dropOk && supportOk && rsiOk && volumeOk;
 
-  // Skor Rebound (0 - 100) sesuai aturan:
-  // Dekat Support (+40), RSI 30-45 (+30), Volume Naik (+20), Candle Hijau Terakhir (+10)
-  let score = 0;
-  if (distToSupport >= -1 && distToSupport <= 4) score += 40;
-  if (rsi >= 30 && rsi <= 45) score += 30;
-  if (volumeRatio > 1.2) score += 20;
-  if (isGreenCandle) score += 10;
+  // Skor Rebound (0 - 100) sesuai checklist:
+  // Drop >8% (+20) + Dekat Support <4% (+30) + Vol >1.2x (+25) + Candle Hijau (+10) + RSI 28-48 (+15)
+  const score =
+    (dropOk ? 20 : 0) +
+    (supportOk ? 30 : 0) +
+    (volumeOk ? 25 : 0) +
+    (isGreenCandle ? 10 : 0) +
+    (rsiOk ? 15 : 0);
 
+  // Label: < 60 tidak boleh POTENSI REBOUND (otomatis TUNGGU / SKIP)
   let label: ReboundLabel = 'SKIP';
-  if (score >= 70) {
+  if (score >= 60) {
     label = 'POTENSI REBOUND';
   } else if (score >= 40) {
     label = 'TUNGGU';
@@ -167,7 +172,7 @@ export function analyzeStockModeD(
     changePercent,
     support,
     supportTests,
-    resistance: high20,
+    resistance,
     distToSupport,
     distToResistance,
     dropFromHigh20,
