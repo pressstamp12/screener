@@ -70,7 +70,6 @@ function parseGoogleNewsRss(
     if (!rawTitle) continue;
 
     let source = extractXmlTag(block, 'source') || 'Google News';
-    // Google News biasanya format "Judul Berita - Nama Media"
     const dashIdx = rawTitle.lastIndexOf(' - ');
     if (dashIdx > 15) {
       const trailingSource = rawTitle.slice(dashIdx + 3).trim();
@@ -191,7 +190,7 @@ async function getCachedNewsFromSupabase(
       result.set(row.ticker, list);
     }
   } catch {
-    // Abaikan jika tabel belum dibuat agar aplikasi tetap jalan
+    // Abaikan jika tabel stock_news belum dibuat agar API tetap jalan
   }
 
   return result;
@@ -204,7 +203,6 @@ async function saveNewsToSupabase(
   if (!isSupabaseConfigured || items.length === 0) return;
 
   try {
-    // Bersihkan cache lama untuk ticker ini agar tabel tetap ringan
     await supabase.from('stock_news').delete().eq('ticker', ticker);
 
     const rows = items.map((item) => ({
@@ -219,7 +217,7 @@ async function saveNewsToSupabase(
 
     await supabase.from('stock_news').insert(rows);
   } catch {
-    // Jangan gagalkan respons API jika cache DB gagal
+    // Jangan gagalkan respons jika cache DB gagal
   }
 }
 
@@ -228,22 +226,18 @@ async function fetchFreshNewsForTicker(
 ): Promise<StockNewsItem[]> {
   if (ticker === 'MACRO') {
     const macroQuery =
-      '("BI Rate" OR IHSG OR "harga batubara" OR "harga nikel" OR CPO OR "harga minyak" OR "nilai tukar rupiah") when:3d';
+      '("BI Rate" OR IHSG OR "harga batubara" OR "harga nikel" OR CPO OR "harga minyak" OR Rupiah) when:3d';
     return fetchGoogleNews(macroQuery, 'MACRO', 8);
   }
 
-  // 1. Coba Yahoo Finance News dulu
+  // 1. Coba Yahoo Finance News terlebih dahulu
   const yahooItems = await fetchYahooTickerNews(ticker);
   if (yahooItems.length > 0) {
     return yahooItems.slice(0, 3);
   }
 
-  // 2. Fallback ke Google News RSS (IDX) jika Yahoo kosong
-  const googleItems = await fetchGoogleNews(
-    `${ticker} IDX OR saham ${ticker} when:7d`,
-    ticker,
-    4
-  );
+  // 2. Fallback ke Google News RSS (TICKER IDX) jika Yahoo kosong
+  const googleItems = await fetchGoogleNews(`${ticker} IDX`, ticker, 4);
   return googleItems.slice(0, 3);
 }
 
@@ -262,18 +256,18 @@ export async function GET(request: NextRequest) {
   ).slice(0, 12);
 
   if (requestedTickers.length === 0) {
-    return NextResponse.json({ news: {}, macro: [] });
+    return NextResponse.json({ news: {}, macroCount: 0 });
   }
 
   const lookupKeys = includeMacro
     ? [...requestedTickers, 'MACRO']
     : requestedTickers;
 
-  // 1. Cek cache 6 jam di Supabase
+  // 1. Ambil cache 6 jam dari Supabase
   const cachedMap = await getCachedNewsFromSupabase(lookupKeys);
   const missingKeys = lookupKeys.filter((k) => !cachedMap.has(k));
 
-  // 2. Fetch paralel untuk ticker yang belum ada di cache
+  // 2. Fetch berita baru untuk ticker yang belum ada di cache
   if (missingKeys.length > 0) {
     const settled = await Promise.allSettled(
       missingKeys.map(async (key) => {
