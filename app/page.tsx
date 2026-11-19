@@ -79,12 +79,13 @@ export default function ScreeningPage() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [infoMsg, setInfoMsg] = useState<string>('');
 
-  // State berita per ticker
+  // State berita per ticker (terpisah dari skor)
   const [newsMap, setNewsMap] = useState<Record<string, TickerNewsBundle>>({});
   const [loadingNewsTickers, setLoadingNewsTickers] = useState<Set<string>>(
     new Set()
   );
-  const fetchedNewsTickersRef = useRef<Set<string>>(new Set());
+  const completedNewsRef = useRef<Set<string>>(new Set());
+  const inFlightNewsRef = useRef<Set<string>>(new Set());
 
   // State watchlist
   const [savedTickers, setSavedTickers] = useState<Set<string>>(new Set());
@@ -152,12 +153,12 @@ export default function ScreeningPage() {
       : { min: 100, max: 3500 };
   };
 
-  // Hitung analisa Mode D + penyesuaian skor berita secara real-time
+  // Analisa Mode D murni teknikal (skor tidak terpengaruh berita)
   const screenedList: ScreenedStock[] = useMemo(() => {
     const { min, max } = getPriceBounds();
 
     return rawStocks
-      .map((raw) => analyzeStockModeD(raw, modalNumber, newsMap[raw.ticker]))
+      .map((raw) => analyzeStockModeD(raw, modalNumber))
       .filter((s) => {
         if (s.price < min || s.price > max) return false;
         if (syariahFilter === 'syariah' && !s.isSyariah) return false;
@@ -172,7 +173,6 @@ export default function ScreeningPage() {
   }, [
     rawStocks,
     modalNumber,
-    newsMap,
     priceFilter,
     customMin,
     customMax,
@@ -186,18 +186,21 @@ export default function ScreeningPage() {
     [screenedList, visibleCount]
   );
 
-  // Ambil berita & sentimen otomatis untuk saham yang sedang ditampilkan di layar (per halaman 10 saham)
+  // Ambil berita & sentimen otomatis untuk saham yang sedang tampil di layar
   useEffect(() => {
     if (visibleStocks.length === 0) return;
 
     const missingTickers = visibleStocks
       .map((s) => s.ticker)
-      .filter((t) => !fetchedNewsTickersRef.current.has(t));
+      .filter(
+        (t) =>
+          !completedNewsRef.current.has(t) && !inFlightNewsRef.current.has(t)
+      );
 
     if (missingTickers.length === 0) return;
 
     let cancelled = false;
-    missingTickers.forEach((t) => fetchedNewsTickersRef.current.add(t));
+    missingTickers.forEach((t) => inFlightNewsRef.current.add(t));
 
     setLoadingNewsTickers((prev) => {
       const next = new Set(prev);
@@ -207,7 +210,6 @@ export default function ScreeningPage() {
 
     const loadVisibleNews = async () => {
       try {
-        // Pecah per 5 ticker agar fetch berita cepat & aman dari timeout
         const NEWS_BATCH = 5;
         for (let i = 0; i < missingTickers.length; i += NEWS_BATCH) {
           if (cancelled) return;
@@ -220,12 +222,14 @@ export default function ScreeningPage() {
           if (!res.ok) continue;
           const data = await res.json();
           if (!cancelled && data?.news) {
+            chunk.forEach((t) => completedNewsRef.current.add(t));
             setNewsMap((prev) => ({ ...prev, ...data.news }));
           }
         }
       } catch {
-        // Jika offline / gagal fetch berita, biarkan card tetap tampil normal
+        // Jika offline / gagal fetch berita, card teknikal tetap tampil normal
       } finally {
+        missingTickers.forEach((t) => inFlightNewsRef.current.delete(t));
         if (!cancelled) {
           setLoadingNewsTickers((prev) => {
             const next = new Set(prev);
@@ -240,6 +244,7 @@ export default function ScreeningPage() {
 
     return () => {
       cancelled = true;
+      missingTickers.forEach((t) => inFlightNewsRef.current.delete(t));
     };
   }, [visibleStocks]);
 
@@ -250,8 +255,9 @@ export default function ScreeningPage() {
     setVisibleCount(PAGE_SIZE);
     setScanProgress({ done: 0, total: DEFAULT_WATCHLIST.length });
 
-    // Reset cache berita di sesi agar ikut refresh
-    fetchedNewsTickersRef.current.clear();
+    // Reset cache berita sesi agar ikut refresh
+    completedNewsRef.current.clear();
+    inFlightNewsRef.current.clear();
     setNewsMap({});
 
     try {
@@ -278,7 +284,6 @@ export default function ScreeningPage() {
         );
         setScanProgress({ done: doneCount, total: DEFAULT_WATCHLIST.length });
 
-        // Update layar progresif tiap batch selesai
         if (collected.length > 0) {
           setRawStocks([...collected]);
         }
@@ -293,7 +298,6 @@ export default function ScreeningPage() {
       setRawStocks(collected);
       setLastScanDate(lastFetchedIso);
 
-      // Simpan cache lokal untuk mode offline
       try {
         localStorage.setItem(
           'modeD_last_raw_stocks',
@@ -304,7 +308,6 @@ export default function ScreeningPage() {
         // abaikan jika storage penuh
       }
 
-      // Simpan hasil screening ke Supabase
       if (isSupabaseConfigured) {
         const today = getTodayISO();
         const { min, max } = getPriceBounds();
