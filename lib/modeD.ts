@@ -13,6 +13,66 @@ const LQ45_SET = new Set([
   'BRPT', 'ESSA', 'TPIA', 'BRMS', 'BUMI',
 ]);
 
+export interface ModeDScoreInput {
+  dropPercent: number;    // (High 20H - Harga) / High 20H * 100
+  distToSupport: number;  // (Harga - Support) / Support * 100
+  rsi: number;            // RSI 14
+  volumeRatio: number;    // Volume Hari Ini / Avg Volume 20H
+  isGreenCandle: boolean; // Close hari ini > Open hari ini
+}
+
+export interface ModeDScoreResult {
+  checks: {
+    dropOk: boolean;
+    supportOk: boolean;
+    rsiOk: boolean;
+    volumeOk: boolean;
+    greenCandle: boolean;
+    allModeD: boolean;
+  };
+  score: number;
+  label: ReboundLabel;
+}
+
+/**
+ * FUNGSI TUNGGAL PERHITUNGAN SKOR, CHECKLIST, DAN LABEL MODE D
+ * Semua card wajib memakai hasil fungsi ini agar 100% konsisten.
+ */
+export function calculateScore(input: ModeDScoreInput): ModeDScoreResult {
+  const dropOk = input.dropPercent > 8;
+  const supportOk = input.distToSupport >= 0 && input.distToSupport <= 4;
+  const rsiOk = input.rsi >= 28 && input.rsi <= 48;
+  const volumeOk = input.volumeRatio > 1.2;
+  const greenCandle = Boolean(input.isGreenCandle);
+
+  const score =
+    (dropOk ? 20 : 0) +
+    (supportOk ? 30 : 0) +
+    (rsiOk ? 15 : 0) +
+    (volumeOk ? 25 : 0) +
+    (greenCandle ? 10 : 0);
+
+  let label: ReboundLabel = 'SKIP';
+  if (score >= 60) {
+    label = 'POTENSI REBOUND';
+  } else if (score >= 40) {
+    label = 'TUNGGU';
+  }
+
+  return {
+    checks: {
+      dropOk,
+      supportOk,
+      rsiOk,
+      volumeOk,
+      greenCandle,
+      allModeD: dropOk && supportOk && rsiOk && volumeOk && greenCandle,
+    },
+    score,
+    label,
+  };
+}
+
 /**
  * Hitung RSI (14) dari data close 14 hari terakhir (15 data close = 14 perubahan harian).
  * Jika data close kurang dari 15 titik, tetap hitung dari data yang ada dan tandai isApprox = true.
@@ -59,9 +119,8 @@ export function calculateRSI14(
 }
 
 /**
- * Cari Support 20 hari: Low terendah dalam 20 hari perdagangan yang sudah diuji minimal 3x
- * (dalam toleransi 2.5% dari titik low tersebut). Jika belum ada yang tersentuh 3x,
- * fallback ke Low terendah 20 hari beserta jumlah ujinya.
+ * Support 20H: Low terendah dalam 20 hari yang sudah diuji minimal 3x (toleransi 2.5%).
+ * Fallback ke Low terendah 20H jika belum ada yang tersentuh 3x.
  */
 export function findSupport20(candles: Candle[]): {
   support: number;
@@ -99,8 +158,7 @@ export function findSupport20(candles: Candle[]): {
 }
 
 /**
- * Analisa lengkap satu saham menggunakan aturan Mode D Screener.
- * Skor murni dari 5 checklist teknikal (max 100), terpisah dari sentimen berita.
+ * Analisa lengkap satu saham menggunakan rumus final Mode D Screener
  */
 export function analyzeStockModeD(
   raw: StockRawData,
@@ -122,36 +180,34 @@ export function analyzeStockModeD(
   const last20 = candles.slice(-20);
   const last5 = candles.slice(-5);
 
-  // High 20 hari dipakai untuk hitung Drop dari High 20H
+  // High 20H untuk Drop, High 5H untuk Resistance terdekat
   const high20 = Math.round(Math.max(...last20.map((c) => c.high), price));
-
-  // Resistance terdekat = High 5 hari terakhir
   const resistance = Math.round(Math.max(...last5.map((c) => c.high), price));
 
-  // Support = Low terendah 20 hari yang sudah diuji minimal 3x
+  // Support = Low 20H uji 3x
   const { support: rawSupport, tests: supportTests } = findSupport20(candles);
   const support = rawSupport > 0 ? rawSupport : Math.round(price * 0.95);
 
-  // Turun dari High 20 hari (%)
-  const dropFromHigh20 =
-    high20 > 0 ? Number((((price - high20) / high20) * 100).toFixed(1)) : 0;
+  // Drop = (High 20H - Harga) / High 20H * 100% (nilai sama untuk UI & checklist)
+  const dropPercent =
+    high20 > 0 ? Number((((high20 - price) / high20) * 100).toFixed(1)) : 0;
+  const dropFromHigh20 = dropPercent === 0 ? 0 : Number((-dropPercent).toFixed(1));
 
-  // SINGLE SOURCE OF TRUTH: JarakKeSupport = (HargaSaatIni - Support) / Support * 100%
-  // Nilai yang sama dipakai untuk tampilan UI dan evaluasi checklist Dekat Support
+  // Dekat Support = (Harga - Support) / Support * 100% (nilai sama untuk UI & checklist)
   const distToSupport =
     support > 0 ? Number((((price - support) / support) * 100).toFixed(1)) : 0;
 
-  // Upside ke Resistance (High 5H) (%)
+  // Upside ke Resistance (High 5H)
   const distToResistance =
     price > 0
       ? Number((((resistance - price) / price) * 100).toFixed(1))
       : 0;
 
-  // Hitung RSI (14) dari data close 14 hari terakhir
+  // RSI (14) dari data close
   const closes14 = candles.slice(-15).map((c) => c.close);
   const { rsi, isApprox: isRsiApprox } = calculateRSI14(closes14, 14);
 
-  // Volume hari ini vs rata-rata 20 hari
+  // Volume Hari Ini / Avg Volume 20H
   const volumeToday = lastCandle?.volume || 0;
   const volSamples = last20.slice(0, Math.max(1, last20.length - 1));
   const avgVolume20 =
@@ -160,33 +216,19 @@ export function analyzeStockModeD(
   const volumeRatio =
     avgVolume20 > 0 ? Number((volumeToday / avgVolume20).toFixed(2)) : 0;
 
-  // Candle hijau terakhir (close > open)
+  // Candle Hijau = Close hari ini > Open hari ini
   const isGreenCandle = lastCandle ? lastCandle.close > lastCandle.open : false;
 
-  // 5 Checklist Mode D (menggunakan nilai eksak yang ditampilkan di UI)
-  const dropOk = dropFromHigh20 < -8;
-  const supportOk = distToSupport >= 0 && distToSupport <= 4;
-  const rsiOk = rsi >= 28 && rsi <= 48;
-  const volumeOk = volumeRatio > 1.2;
-  const allModeD = dropOk && supportOk && rsiOk && volumeOk && isGreenCandle;
+  // Hitung skor, checklist, & label dari 1 fungsi tunggal calculateScore()
+  const { checks, score, label } = calculateScore({
+    dropPercent,
+    distToSupport,
+    rsi,
+    volumeRatio,
+    isGreenCandle,
+  });
 
-  // Rumus Skor Rebound persis sesuai 5 checklist (Total max 100, tanpa modifikasi berita)
-  const score =
-    (dropOk ? 20 : 0) +
-    (supportOk ? 30 : 0) +
-    (rsiOk ? 15 : 0) +
-    (volumeOk ? 25 : 0) +
-    (isGreenCandle ? 10 : 0);
-
-  // Label berdasarkan skor murni: >= 60 POTENSI REBOUND, 40-59 TUNGGU, < 40 SKIP
-  let label: ReboundLabel = 'SKIP';
-  if (score >= 60) {
-    label = 'POTENSI REBOUND';
-  } else if (score >= 40) {
-    label = 'TUNGGU';
-  }
-
-  // Hitung lot yang bisa dibeli (1 lot IDX = 100 lembar)
+  // Hitung lot yang bisa dibeli (1 lot = 100 lembar)
   const costPerLot = price * 100;
   const lotAffordable =
     costPerLot > 0 && modalUser > 0 ? Math.floor(modalUser / costPerLot) : 0;
@@ -216,13 +258,6 @@ export function analyzeStockModeD(
     label,
     lotAffordable,
     estimatedCost,
-    checks: {
-      dropOk,
-      supportOk,
-      rsiOk,
-      volumeOk,
-      greenCandle: isGreenCandle,
-      allModeD,
-    },
+    checks,
   };
 }
