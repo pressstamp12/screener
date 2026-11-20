@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { db, isDbConfigured } from '@/lib/supabaseServer';
 import {
   buildTickerNewsBundle,
   classifyNewsSentiment,
@@ -219,7 +219,7 @@ async function getCachedNewsFromSupabase(
   keys: string[]
 ): Promise<NewsCacheMap> {
   const result: NewsCacheMap = new Map();
-  if (!isSupabaseConfigured || keys.length === 0) return result;
+  if (!isDbConfigured || keys.length === 0) return result;
 
   try {
     const cutoff6HoursIso = new Date(
@@ -229,7 +229,7 @@ async function getCachedNewsFromSupabase(
       Date.now() - MAX_NEWS_AGE_DAYS * 24 * 60 * 60 * 1000
     ).toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await db()
       .from('stock_news')
       .select('*')
       .in('ticker', keys)
@@ -261,7 +261,7 @@ async function saveNewsToSupabase(
   tickerKey: string,
   items: StockNewsItem[]
 ): Promise<void> {
-  if (!isSupabaseConfigured) return;
+  if (!isDbConfigured) return;
 
   try {
     const cutoff7DaysIso = new Date(
@@ -269,12 +269,12 @@ async function saveNewsToSupabase(
     ).toISOString();
 
     // Hapus berita lama (> 7 hari) dan cache lama untuk ticker ini saat fetch baru
-    await supabase
+    await db()
       .from('stock_news')
       .delete()
       .eq('ticker', tickerKey);
 
-    await supabase
+    await db()
       .from('stock_news')
       .delete()
       .lt('published_at', cutoff7DaysIso);
@@ -294,7 +294,7 @@ async function saveNewsToSupabase(
       url: item.url,
     }));
 
-    await supabase.from('stock_news').insert(rows);
+    await db().from('stock_news').insert(rows);
   } catch {
     // Jangan gagalkan respons API jika cache DB gagal
   }

@@ -1,5 +1,6 @@
 export interface Candle {
-  date: string;
+  t?: number; // epoch ms (opsional untuk data lama)
+  date: string; // YYYY-MM-DD (WIB)
   open: number;
   high: number;
   low: number;
@@ -7,16 +8,15 @@ export interface Candle {
   volume: number;
 }
 
-export interface StockRawData {
+export interface StockSeries {
   ticker: string;
   name: string;
-  currency: string;
   price: number;
   prevClose: number;
-  candles: Candle[];
+  regularMarketTime?: number;
+  daily: Candle[];
+  intraday?: Candle[]; // 5 menit, beberapa hari terakhir
 }
-
-export type ReboundLabel = 'POTENSI REBOUND' | 'TUNGGU' | 'SKIP';
 
 export type NewsSentiment = 'POSITIF' | 'NEGATIF' | 'NETRAL';
 
@@ -40,43 +40,6 @@ export interface TickerNewsBundle {
   hasPositive24h: boolean;
 }
 
-export interface ModeDChecks {
-  isDrop: boolean;
-  isDekat: boolean;
-  isRSI: boolean;
-  isVol: boolean;
-  isCandle: boolean;
-  allModeD: boolean;
-}
-
-export interface ScreenedStock {
-  ticker: string;
-  name: string;
-  isSyariah: boolean;
-  isLq45: boolean;
-  price: number;
-  prevClose: number;
-  changePercent: number;
-  support: number;
-  supportTests: number;
-  resistance: number;
-  distToSupport: number;
-  distToResistance: number;
-  dropFromHigh20: number;
-  rsi: number;
-  isRsiApprox: boolean;
-  volumeToday: number;
-  avgVolume20: number;
-  volumeRatio: number;
-  isGreenCandle: boolean;
-  score: number;
-  scoreBreakdown: string;
-  label: ReboundLabel;
-  lotAffordable: number;
-  estimatedCost: number;
-  checks: ModeDChecks;
-}
-
 export type PriceFilterKey =
   | 'default_100_3500'
   | 'all'
@@ -88,26 +51,33 @@ export type PriceFilterKey =
 
 export type SyariahFilter = 'all' | 'syariah' | 'non_syariah';
 
-export type ResultQuickFilter = 'all' | 'lq45' | 'syariah' | 'score_gt_60';
-
 export interface WatchlistItem {
   id: number;
   ticker: string;
+  strategy: string | null;
   entry_plan: number;
   tp: number;
   sl: number;
   lot: number;
   modal: number;
+  score: number | null;
+  note: string | null;
   created_at: string;
 }
 
 export interface TradeItem {
   id: number;
   ticker: string;
+  strategy: string | null;
   entry_price: number;
   exit_price: number;
+  sl: number | null;
+  tp: number | null;
   lot: number;
+  fees: number | null;
   profit_loss: number;
+  r_multiple: number | null;
+  score_at_entry: number | null;
   note: string;
   trade_date: string;
 }

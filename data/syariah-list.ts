@@ -1,18 +1,30 @@
 /**
- * Watchlist default universe screening (LQ45 + JII + IDX30)
+ * Universe default: saham likuid IDX (bank, komoditas, konsumer, teknologi, dll).
+ * Bisa diubah dari halaman Pengaturan. Ticker yang tidak ada di Yahoo otomatis dilewati.
  */
 export const DEFAULT_WATCHLIST: string[] = [
-  'BBCA', 'BBRI', 'BMRI', 'BBNI', 'BRIS',
-  'BREN', 'AMRT', 'ICBP', 'INDF', 'UNVR',
-  'ASII', 'TLKM', 'EXCL', 'ISAT', 'TOWR',
-  'MAPI', 'INKP', 'TKIM', 'MDKA', 'ANTM',
-  'INCO', 'PTBA', 'ADRO', 'ITMG', 'BUMI',
-  'BRMS', 'DEWA', 'GOTO', 'BUKA', 'ERAA',
-  'ACES', 'SCMA', 'SRTG', 'KLBF', 'SIDO',
-  'CPIN', 'JPFA', 'SMGR', 'INTP', 'CTRA',
-  'SMRA', 'BSDE', 'PWON', 'JSMR', 'PGEO',
-  'MBMA', 'NCKL', 'ARTO', 'BRPT', 'ESSA',
-  'TPIA', 'TOTL', 'CMNP',
+  // Bank
+  'BBCA', 'BBRI', 'BMRI', 'BBNI', 'BRIS', 'BBTN', 'ARTO', 'BNGA', 'BJBR', 'BJTM', 'BTPS',
+  // Batubara & energi
+  'ADRO', 'AADI', 'ADMR', 'PTBA', 'ITMG', 'BUMI', 'DEWA', 'INDY', 'HRUM', 'MEDC', 'PGAS',
+  'ELSA', 'AKRA', 'ENRG', 'RAJA', 'PTRO', 'CUAN', 'BREN', 'PGEO', 'ESSA', 'AMMN',
+  // Logam & tambang
+  'ANTM', 'INCO', 'MDKA', 'MBMA', 'NCKL', 'BRMS', 'TINS', 'PSAB', 'ARCI', 'EMAS',
+  // Industri dasar & otomotif
+  'TPIA', 'BRPT', 'ASII', 'UNTR', 'INKP', 'TKIM', 'SMGR', 'INTP', 'SMDR',
+  // Telko, teknologi & media
+  'TLKM', 'ISAT', 'EXCL', 'TOWR', 'MTEL', 'GOTO', 'BUKA', 'EMTK', 'WIFI', 'DCII', 'SCMA', 'MNCN',
+  // Konsumer & ritel
+  'ICBP', 'INDF', 'UNVR', 'MYOR', 'CPIN', 'JPFA', 'KLBF', 'SIDO', 'HMSP', 'GGRM',
+  'AMRT', 'MIDI', 'MAPI', 'MAPA', 'ACES', 'ERAA',
+  // Kesehatan
+  'HEAL', 'MIKA', 'SILO',
+  // Properti & konstruksi
+  'CTRA', 'BSDE', 'PWON', 'SMRA', 'PANI', 'JSMR', 'TOTL', 'CMNP', 'ADHI', 'PTPP',
+  // Perkebunan
+  'AALI', 'LSIP', 'TAPG', 'DSNG', 'SSMS',
+  // Lainnya
+  'SRTG', 'AVIA',
 ];
 
 /**
@@ -51,6 +63,7 @@ export const SYARIAH_TICKERS: string[] = [
   'MNCN', 'MYOR', 'PANI', 'PGAS', 'PNBS',
   'PTPP', 'RAJA', 'SILO', 'TAPG', 'TINS',
   'UNTR', 'WIKA',
+  'AADI', 'AALI', 'DSNG', 'SSMS', 'MIDI', 'MAPA', 'MTEL', 'PTRO', 'CUAN', 'ENRG', 'ARCI', 'PSAB', 'EMAS', 'WIFI', 'SMDR',
 ];
 
 export type StockSector =

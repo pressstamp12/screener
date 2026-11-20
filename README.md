@@ -1,69 +1,63 @@
-# Mode D Screener (PWA)
+# Screener IDX v2 — Day Trade & Rebound
 
-Aplikasi PWA screening saham rebound harian (IDX / `.JK`) bergaya santai, mobile-first, dan dirancang khusus untuk trader modal kecil di Indonesia.
+Screener saham IDX pribadi (PWA) dengan skor multi-faktor, rencana trade otomatis, dan **backtest yang memakai logika skor yang sama persis**, supaya akurasinya bisa diukur, bukan ditebak.
 
-## Fitur Utama
-1. **Screening Hari Ini**: Filter Range Harga (default `Rp 100 - 3.500`), Filter Syariah / Non-Syariah (`data/syariah-list.ts`), Input Modal (default `Rp 500.000` untuk hitung lot), Analisa Mode D otomatis (Drop ≥8% dari High 20H, Dekat Support 20H ≤4%, RSI 14 di 28-48, Volume >1.2x), dan Skor Rebound 0-100.
-2. **Watchlist Saya**: Simpan saham incaran, atur Harga Beli Rencana, Target (TP), Cut Loss (SL), Lot, dan Modal. Otomatis hitung Estimasi Untung, Estimasi Rugi, Risk/Reward Ratio, plus tombol **Cek Harga Terbaru**.
-3. **Jurnal / Riwayat**: Catat hasil trade (Ticker, Entry, Exit, Lot, Alasan Masuk) ke Supabase dan pantau Total Trade, Win Rate %, serta Total Profit/Loss.
-4. **PWA Ready**: Dark mode satu tangan, bisa **Add to Homescreen**, dan punya offline fallback *"Kamu offline, data terakhir tanggal X"*.
+## Isi aplikasi
 
----
+| Halaman | Fungsi |
+|---|---|
+| **Screener** | Scan ±100 saham likuid. Dua strategi: **Day Trade** (momentum intraday) dan **Rebound** (pantulan dari support). Tiap saham dapat skor 0–100, alasan per faktor, peringatan, rencana Entry/Cut loss/TP1/TP2, ukuran lot sesuai risiko, berita 7 hari, dan win rate historis dari backtest. |
+| **Watchlist** | Rencana yang dipantau + harga terkini, status (kena SL / TP), P/L bersih. Satu ketukan untuk memindahkan ke jurnal. |
+| **Jurnal** | Catatan trade nyata: win rate, profit factor, rata-rata R, P/L setelah biaya. |
+| **Backtest** | Uji 2 tahun data harian atau 60 hari data 5 menit. Hasil per rentang skor dan per faktor; otomatis jadi kalibrasi di kartu screener. |
+| **Atur** | Modal, risiko per trade, biaya broker, batas likuiditas, auto-refresh, daftar saham. |
 
-## Panduan Setup & Deploy (5 Langkah Mudah)
+### Faktor yang dinilai
 
-### 1. Buat Project Supabase
-1. Buka [https://supabase.com](https://supabase.com) lalu login / daftar gratis.
-2. Klik **New Project**, isi nama project (misal `mode-d-screener`), buat password database, pilih region **Singapore (`ap-southeast-1`)**, lalu klik **Create new project**.
-3. Tunggu sekitar 1-2 menit sampai project siap.
-4. Buka menu **Project Settings** (ikon gerigi kiri bawah) → **API**.
-5. Catat dua nilai penting ini:
-   - **Project URL** (`NEXT_PUBLIC_SUPABASE_URL`)
-   - **anon / public key** (`NEXT_PUBLIC_SUPABASE_ANON_KEY`)
+**Day Trade (sesi berjalan):** tren harian (EMA20/50 + kemiringan), **RVOL yang disesuaikan jam** (volume hari ini dibanding porsi volume yang normalnya sudah terjadi pada jam yang sama, dari profil intraday 5 hari), posisi terhadap **VWAP**, breakout **opening range 15 menit** & dekat high hari ini, momentum 5 menit (EMA9/21, RSI), RSI harian, ATR%, ruang ke resistance, MACD.
+**Day Trade (pasar tutup):** menilai setup untuk sesi berikutnya — close dekat high, breakout high 20 hari, momentum, volume.
+**Rebound:** RSI Wilder oversold, jarak ke support (dalam satuan ATR, dari klaster pivot low 90 hari), berapa kali support teruji, besar koreksi, candle pembalikan (hammer/engulfing), volume konfirmasi, stochastic cross, MACD melemah, filter downtrend kuat (ADX/DI), tanda akumulasi (MFI/OBV).
+**Untuk semua:** filter likuiditas (nilai transaksi rata-rata), regime IHSG (bullish/netral/bearish + kondisi hari ini), berita negatif 24 jam, ARA/ARB, fraksi harga, R:R bersih setelah biaya.
 
-### 2. Copy & Jalankan SQL
-1. Di dashboard Supabase, klik menu **SQL Editor** di sidebar kiri → klik **New query**.
-2. Buka file `supabase/schema.sql` dari project ini, copy seluruh isinya.
-3. Paste ke SQL Editor Supabase, lalu klik tombol **Run** (Ctrl+Enter).
-4. Pastikan muncul pesan `Success. No rows returned`. Cek menu **Table Editor** untuk memastikan tabel `screening_results`, `watchlist`, dan `trades` sudah terbuat.
+Aturan BEI ada di `lib/idx.ts`: fraksi harga, ARB 7% (berlaku s/d 31 Des 2026; mulai 2027 otomatis simetris), jam sesi termasuk Jumat.
 
-### 3. Push ke GitHub
-1. Buat repository baru di [https://github.com/new](https://github.com/new) (misal nama repo `mode-d-screener`).
-2. Extract file ZIP ini di komputer kamu, buka terminal di dalam folder `mode-d-screener`, lalu jalankan:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit: Mode D Screener PWA"
-   git branch -M main
-   git remote add origin https://github.com/USERNAME_KAMU/mode-d-screener.git
-   git push -u origin main
-   ```
+## Setup
 
-### 4. Deploy ke Vercel
-1. Buka [https://vercel.com](https://vercel.com) dan login dengan akun GitHub kamu.
-2. Klik **Add New...** → **Project**, lalu pilih repo `mode-d-screener`.
-3. Buka bagian **Environment Variables**, lalu tambahkan 2 variabel ini:
-   - `NEXT_PUBLIC_SUPABASE_URL` = *(Project URL dari Langkah 1)*
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = *(anon public key dari Langkah 1)*
-4. Klik **Deploy** dan tunggu ~1 menit. Aplikasi langsung online!
+### 1. Supabase
+1. SQL Editor → paste seluruh isi `supabase/schema.sql` → **Run**. Aman untuk database v1 lama: data tetap ada, duplikat dibersihkan, RLS dinyalakan.
+2. Project Settings → API → salin **Project URL** dan **service_role key** (bukan anon key).
 
-### 5. Add to Homescreen (Pasang di HP Seperti Aplikasi)
-- **Android (Chrome)**:
-  1. Buka link Vercel kamu di Chrome.
-  2. Tap ikon titik tiga (`⋮`) di pojok kanan atas.
-  3. Pilih **Tambahkan ke layar utama** / **Install app** → tap **Install**.
-- **iPhone / iOS (Safari)**:
-  1. Buka link Vercel kamu di Safari.
-  2. Tap tombol **Share** (ikon kotak dengan panah ke atas di tengah bawah).
-  3. Scroll ke bawah lalu pilih **Add to Home Screen** → tap **Add**.
+### 2. Environment Variables di Vercel
+Project → Settings → Environment Variables:
 
----
+| Nama | Isi |
+|---|---|
+| `APP_PASSWORD` | password untuk masuk aplikasi |
+| `SUPABASE_URL` | Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role key |
 
-## Menjalankan Secara Lokal (Opsional)
+Hapus `NEXT_PUBLIC_SUPABASE_ANON_KEY` yang lama (tidak dipakai lagi). Lalu **Redeploy**.
+
+### 3. Pemakaian yang disarankan
+1. Buka **Backtest** → jalankan *Day Trade · Harian* dan *Rebound · Harian* (semua saham). Untuk day trade, jalankan juga *Intraday 5m*.
+2. Lihat rentang skor mana yang rata-rata R-nya positif. Hanya trade rentang itu.
+3. Di Screener, kartu saham akan menampilkan "Histori skor X–Y: Z% profit".
+4. Catat setiap trade di Jurnal, lalu bandingkan dengan angka backtest.
+
+## Keamanan
+- Semua halaman & API dilindungi password (cookie httpOnly, dibatasi 5 percobaan / 5 menit).
+- Supabase hanya diakses dari server dengan service role key; tabel memakai RLS tanpa policy, jadi anon key tidak bisa membaca/menulis apa pun.
+
+## Batasan yang perlu diketahui
+- Data Yahoo untuk IDX **tertunda ±10 menit** dan tidak resmi; bisa sesekali gagal (rate limit).
+- Tidak ada data broker summary / foreign flow / bid-offer (tidak tersedia gratis).
+- Daftar syariah statis di `data/syariah-list.ts` — cocokkan dengan DES OJK terbaru.
+- Backtest harian untuk day trade bersifat konservatif (jika SL & TP tersentuh di hari yang sama dianggap SL).
+
+## Pengembangan
 ```bash
 cp .env.example .env.local
-# Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY di .env.local
 npm install
+npm test        # unit test indikator, aturan BEI, skor, backtest
 npm run dev
 ```
-Buka `http://localhost:3000`.

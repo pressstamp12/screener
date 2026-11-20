@@ -1,478 +1,199 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Bookmark,
-  RefreshCw,
-  Trash2,
-  Save,
-  Plus,
-  AlertCircle,
-  CheckCircle2,
-} from 'lucide-react';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
-import { formatPercent, formatPrice, formatRupiah } from '@/lib/format';
-import { WatchlistItem } from '@/lib/types';
-import { isSyariahTicker } from '@/data/syariah-list';
+import { BookCheck, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { api, fetchSeries, loadSettings } from '@/lib/client';
+import { DEFAULT_FEES, FeeConfig, netPnl } from '@/lib/idx';
+import { formatRupiah, getTodayISO } from '@/lib/format';
+import type { WatchlistItem } from '@/lib/types';
 
-interface LivePriceMap {
-  [ticker: string]: {
-    price: number;
-    changePercent: number;
-  };
-}
+const n = (v: number) => Math.round(v).toLocaleString('id-ID');
 
 export default function WatchlistPage() {
   const [items, setItems] = useState<WatchlistItem[]>([]);
-  const [livePrices, setLivePrices] = useState<LivePriceMap>({});
-  const [loading, setLoading] = useState<boolean>(true);
-  const [checkingPrices, setCheckingPrices] = useState<boolean>(false);
-  const [savingId, setSavingId] = useState<number | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string>('');
-  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [prices, setPrices] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [err, setErr] = useState('');
+  const [fees, setFees] = useState<FeeConfig>(DEFAULT_FEES);
+  const [closing, setClosing] = useState<number | null>(null);
+  const [exitPrice, setExitPrice] = useState('');
 
-  // Form tambah ticker manual
-  const [showAddForm, setShowAddForm] = useState<boolean>(false);
-  const [newTicker, setNewTicker] = useState<string>('');
-
-  const loadWatchlist = async () => {
-    if (!isSupabaseConfigured) {
+  const load = async () => {
+    try {
+      setItems(await api.get<WatchlistItem>('watchlist'));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Gagal memuat');
+    } finally {
       setLoading(false);
-      setErrorMsg('ENV Supabase belum diset. Cek README untuk panduan setup.');
-      return;
     }
-
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('watchlist')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      setErrorMsg(`Gagal memuat watchlist: ${error.message}`);
-    } else {
-      setItems((data || []) as WatchlistItem[]);
-    }
-    setLoading(false);
   };
 
   useEffect(() => {
-    loadWatchlist();
+    setFees(loadSettings().screen.fees);
+    load();
   }, []);
 
-  const handleFieldChange = (
-    id: number,
-    field: 'entry_plan' | 'tp' | 'sl' | 'lot' | 'modal',
-    rawVal: string
-  ) => {
-    const num = Number(rawVal) || 0;
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        const updated = { ...item, [field]: num };
-        // Otomatis sinkronkan modal saat entry_plan atau lot diubah
-        if (field === 'entry_plan' || field === 'lot') {
-          updated.modal = updated.entry_plan * updated.lot * 100;
-        }
-        return updated;
-      })
+  const refreshPrices = async () => {
+    if (!items.length) return;
+    setRefreshing(true);
+    const { series } = await fetchSeries(
+      items.map((i) => i.ticker),
+      { daily: '6mo', intraday: 'none' }
     );
+    setPrices(Object.fromEntries(series.map((s) => [s.ticker, s.price])));
+    setRefreshing(false);
   };
 
-  const handleSaveItem = async (item: WatchlistItem) => {
-    setSavingId(item.id);
-    setErrorMsg('');
-    setStatusMsg('');
+  useEffect(() => {
+    if (items.length) refreshPrices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
 
-    const { error } = await supabase
-      .from('watchlist')
-      .update({
-        entry_plan: item.entry_plan,
-        tp: item.tp,
-        sl: item.sl,
-        lot: item.lot,
-        modal: item.modal,
-      })
-      .eq('id', item.id);
-
-    if (error) {
-      setErrorMsg(`Gagal simpan ${item.ticker}: ${error.message}`);
-    } else {
-      setStatusMsg(`Rencana trading ${item.ticker} tersimpan!`);
-    }
-    setSavingId(null);
+  const update = async (it: WatchlistItem, field: keyof WatchlistItem, value: number) => {
+    setItems((arr) => arr.map((x) => (x.id === it.id ? { ...x, [field]: value } : x)));
+    await api.update('watchlist', { id: it.id, [field]: value }).catch(() => setErr('Gagal menyimpan perubahan'));
   };
 
-  const handleDeleteItem = async (id: number, ticker: string) => {
-    const { error } = await supabase.from('watchlist').delete().eq('id', id);
-    if (error) {
-      setErrorMsg(`Gagal hapus ${ticker}: ${error.message}`);
-      return;
-    }
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    setStatusMsg(`${ticker} dihapus dari watchlist.`);
+  const remove = async (id: number) => {
+    setItems((arr) => arr.filter((x) => x.id !== id));
+    await api.remove('watchlist', id).catch(() => setErr('Gagal menghapus'));
   };
 
-  const handleAddManual = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = newTicker.replace(/\.JK$/i, '').trim().toUpperCase();
-    if (!clean) return;
-
-    setErrorMsg('');
-    const { data, error } = await supabase
-      .from('watchlist')
-      .upsert(
-        {
-          ticker: clean,
-          entry_plan: 0,
-          tp: 0,
-          sl: 0,
-          lot: 1,
-          modal: 0,
-        },
-        { onConflict: 'ticker' }
-      )
-      .select()
-      .single();
-
-    if (error) {
-      setErrorMsg(`Gagal tambah ${clean}: ${error.message}`);
-      return;
-    }
-
-    if (data) {
-      setItems((prev) => {
-        const exists = prev.some((i) => i.ticker === clean);
-        return exists ? prev : [data as WatchlistItem, ...prev];
-      });
-    }
-    setNewTicker('');
-    setShowAddForm(false);
-    setStatusMsg(`${clean} ditambahkan ke watchlist!`);
-  };
-
-  const handleCheckLatestPrices = async () => {
-    if (items.length === 0) return;
-    setCheckingPrices(true);
-    setErrorMsg('');
-    setStatusMsg('');
-
-    try {
-      const tickers = items.map((i) => i.ticker).join(',');
-      const res = await fetch(`/api/stocks?tickers=${tickers}`, {
-        cache: 'no-store',
-      });
-      if (!res.ok) throw new Error('Gagal cek harga dari Yahoo Finance.');
-
-      const data = await res.json();
-      const map: LivePriceMap = {};
-
-      for (const s of data.stocks || []) {
-        const prev = s.prevClose || s.price;
-        const pct = prev > 0 ? ((s.price - prev) / prev) * 100 : 0;
-        map[s.ticker] = {
-          price: Math.round(s.price),
-          changePercent: Number(pct.toFixed(2)),
-        };
-      }
-
-      setLivePrices(map);
-      setStatusMsg(`Harga terbaru ${Object.keys(map).length} saham berhasil di-update!`);
-    } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : 'Gagal update harga terbaru.'
-      );
-    } finally {
-      setCheckingPrices(false);
-    }
+  const closeToJournal = async (it: WatchlistItem) => {
+    const exit = Number(exitPrice);
+    if (!exit) return;
+    const pl = netPnl(it.entry_plan, exit, it.lot, fees);
+    const gross = (exit - it.entry_plan) * it.lot * 100;
+    const riskPerShare = it.entry_plan - it.sl;
+    await api.save('trades', {
+      ticker: it.ticker,
+      strategy: it.strategy,
+      entry_price: it.entry_plan,
+      exit_price: exit,
+      sl: it.sl,
+      tp: it.tp,
+      lot: it.lot,
+      fees: Math.round(gross - pl),
+      profit_loss: Math.round(pl),
+      r_multiple: riskPerShare > 0 ? Number((pl / (riskPerShare * it.lot * 100)).toFixed(2)) : null,
+      score_at_entry: it.score,
+      note: it.note || '',
+      trade_date: getTodayISO(),
+    });
+    await remove(it.id);
+    setClosing(null);
+    setExitPrice('');
   };
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <header className="flex items-center justify-between">
+    <div className="space-y-4">
+      <header className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-white">
-            Watchlist Saya
-          </h1>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Atur plan Entry, TP, SL & cek Risk/Reward otomatis
-          </p>
+          <h1 className="text-2xl font-black tracking-tight">Watchlist</h1>
+          <p className="text-sm text-zinc-400">Rencana trade yang sedang dipantau</p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowAddForm((v) => !v)}
-          className="bg-[#1A1A1A] border border-[#2E2E2E] text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 active:scale-95"
-        >
-          <Plus className="w-4 h-4 text-[#00C853]" />
-          Tambah
+        <button onClick={refreshPrices} disabled={refreshing || !items.length} className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl bg-[#1A1A1A] border border-[#2A2A2A]">
+          {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Harga
         </button>
       </header>
 
-      {/* Form Tambah Manual */}
-      {showAddForm && (
-        <form
-          onSubmit={handleAddManual}
-          className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-3.5 flex gap-2"
-        >
-          <input
-            type="text"
-            value={newTicker}
-            onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
-            placeholder="Ketik ticker (misal: ADRO)"
-            maxLength={6}
-            className="flex-1 bg-[#121212] border border-[#333] rounded-xl px-3.5 py-2.5 text-sm font-bold text-white uppercase focus:outline-none focus:border-[#00C853]"
-          />
-          <button
-            type="submit"
-            className="bg-[#00C853] text-black font-black text-sm px-4 rounded-xl active:scale-95"
-          >
-            Simpan
-          </button>
-        </form>
-      )}
+      {err && <div className="text-sm text-[#FF3B30]">{err}</div>}
+      {loading && <div className="text-zinc-500 text-sm">Memuat…</div>}
+      {!loading && !items.length && !err && <div className="text-zinc-500 text-sm py-10 text-center">Belum ada. Simpan dari halaman Screener.</div>}
 
-      {/* Tombol Besar CEK HARGA TERBARU */}
-      <button
-        type="button"
-        disabled={checkingPrices || items.length === 0}
-        onClick={handleCheckLatestPrices}
-        className="w-full min-h-[54px] bg-[#00C853] hover:bg-[#00e05d] disabled:opacity-50 text-black font-black text-base rounded-2xl flex items-center justify-center gap-2.5 shadow-lg shadow-[#00C853]/20 transition-all active:scale-[0.98]"
-      >
-        <RefreshCw
-          className={`w-5 h-5 ${checkingPrices ? 'animate-spin' : ''}`}
-        />
-        {checkingPrices ? 'Mengambil harga terbaru...' : 'CEK HARGA TERBARU'}
-      </button>
-
-      {/* Feedback */}
-      {errorMsg && (
-        <div className="bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-2xl p-3.5 text-sm flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-
-      {statusMsg && !errorMsg && (
-        <div className="bg-[#00C853]/10 border border-[#00C853]/30 text-[#00C853] rounded-2xl p-3 text-xs font-semibold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
-          <span>{statusMsg}</span>
-        </div>
-      )}
-
-      {/* List Watchlist */}
-      {loading ? (
-        <div className="text-center py-10 text-zinc-400 text-sm">
-          Memuat watchlist kamu...
-        </div>
-      ) : items.length === 0 ? (
-        <div className="bg-[#1A1A1A] border border-dashed border-[#333] rounded-2xl p-8 text-center space-y-2">
-          <Bookmark className="w-10 h-10 text-zinc-600 mx-auto" />
-          <p className="font-bold text-zinc-200">Watchlist masih kosong</p>
-          <p className="text-xs text-zinc-400">
-            Scan dulu di halaman Screening lalu klik &quot;Simpan ke Watchlist&quot;.
-          </p>
-        </div>
-      ) : (
-        <section className="space-y-4">
-          {items.map((item) => {
-            const live = livePrices[item.ticker];
-            const shares = item.lot * 100;
-            const entry = item.entry_plan;
-            const estProfitRp =
-              entry > 0 && item.tp > 0 ? (item.tp - entry) * shares : 0;
-            const estProfitPct =
-              entry > 0 && item.tp > 0 ? ((item.tp - entry) / entry) * 100 : 0;
-
-            const estLossRp =
-              entry > 0 && item.sl > 0 ? (entry - item.sl) * shares : 0;
-            const estLossPct =
-              entry > 0 && item.sl > 0 ? ((entry - item.sl) / entry) * 100 : 0;
-
-            const risk = entry - item.sl;
-            const reward = item.tp - entry;
-            const rrRatio =
-              risk > 0 && reward > 0 ? (reward / risk).toFixed(2) : null;
-
-            return (
-              <article
-                key={item.id}
-                className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-4"
-              >
-                {/* Header Card */}
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-2xl font-black text-white">
-                        {item.ticker}
-                      </h2>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                          isSyariahTicker(item.ticker)
-                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50'
-                        }`}
-                      >
-                        {isSyariahTicker(item.ticker) ? 'SYARIAH' : 'NON-SYARIAH'}
-                      </span>
-                    </div>
-
-                    {live && (
-                      <div className="mt-1 flex items-center gap-2 text-xs">
-                        <span className="text-zinc-400">Harga Live:</span>
-                        <span className="font-extrabold text-white text-sm">
-                          {formatPrice(live.price)}
-                        </span>
-                        <span
-                          className={`font-bold ${
-                            live.changePercent >= 0
-                              ? 'text-[#00C853]'
-                              : 'text-[#FF3B30]'
-                          }`}
-                        >
-                          ({formatPercent(live.changePercent)})
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteItem(item.id, item.ticker)}
-                    aria-label={`Hapus ${item.ticker}`}
-                    className="p-2 rounded-xl bg-[#121212] text-zinc-400 hover:text-[#FF3B30] border border-[#262626]"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+      {items.map((it) => {
+        const px = prices[it.ticker];
+        const pl = px ? netPnl(it.entry_plan, px, it.lot, fees) : null;
+        const status = !px ? null : px <= it.sl ? 'KENA CUT LOSS' : px >= it.tp ? 'TARGET TERCAPAI' : px < it.entry_plan ? 'Di bawah entry' : 'Di atas entry';
+        const statusColor = !px ? '' : px <= it.sl ? 'text-[#FF3B30]' : px >= it.tp ? 'text-[#00C853]' : 'text-zinc-400';
+        const risk = (it.entry_plan - it.sl) * it.lot * 100;
+        const reward = (it.tp - it.entry_plan) * it.lot * 100;
+        return (
+          <div key={it.id} className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-3">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="text-lg font-extrabold">{it.ticker}</div>
+                <div className="text-xs text-zinc-500">
+                  {it.strategy === 'DAYTRADE' ? 'Day trade' : it.strategy === 'REBOUND' ? 'Rebound' : 'Manual'}
+                  {it.score != null && ` · skor ${it.score}`}
                 </div>
-
-                {/* Input Trading Plan */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="text-[11px] text-zinc-400 block mb-1">
-                      Beli Rencana
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={item.entry_plan || ''}
-                      onChange={(e) =>
-                        handleFieldChange(item.id, 'entry_plan', e.target.value)
-                      }
-                      className="w-full bg-[#121212] border border-[#333] rounded-xl px-2.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-[#00C853] block mb-1">
-                      Target (TP)
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={item.tp || ''}
-                      onChange={(e) =>
-                        handleFieldChange(item.id, 'tp', e.target.value)
-                      }
-                      className="w-full bg-[#121212] border border-[#00C853]/40 rounded-xl px-2.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-[#FF3B30] block mb-1">
-                      Cut Loss (SL)
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={item.sl || ''}
-                      onChange={(e) =>
-                        handleFieldChange(item.id, 'sl', e.target.value)
-                      }
-                      className="w-full bg-[#121212] border border-[#FF3B30]/40 rounded-xl px-2.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#FF3B30]"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[11px] text-zinc-400 block mb-1">
-                      Jumlah Lot
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={item.lot || ''}
-                      onChange={(e) =>
-                        handleFieldChange(item.id, 'lot', e.target.value)
-                      }
-                      className="w-full bg-[#121212] border border-[#333] rounded-xl px-3 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-zinc-400 block mb-1">
-                      Modal (Rp)
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={item.modal || ''}
-                      onChange={(e) =>
-                        handleFieldChange(item.id, 'modal', e.target.value)
-                      }
-                      className="w-full bg-[#121212] border border-[#333] rounded-xl px-3 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-                    />
-                  </div>
-                </div>
-
-                {/* Kalkulasi Otomatis Profit, Loss, R/R */}
-                <div className="bg-[#121212] border border-[#252525] rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-400">Estimasi Untung (TP)</span>
-                    <span className="font-extrabold text-[#00C853]">
-                      +{formatRupiah(Math.max(0, estProfitRp))} (
-                      {formatPercent(estProfitPct)})
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-400">Estimasi Rugi (SL)</span>
-                    <span className="font-extrabold text-[#FF3B30]">
-                      -{formatRupiah(Math.max(0, estLossRp))} (
-                      -{Math.max(0, estLossPct).toFixed(1)}%)
-                    </span>
-                  </div>
-                  <div className="pt-2 border-t border-[#242424] flex items-center justify-between">
-                    <span className="text-xs text-zinc-400">
-                      Risk / Reward Ratio
-                    </span>
-                    <span
-                      className={`text-sm font-black px-2.5 py-0.5 rounded-lg ${
-                        rrRatio && Number(rrRatio) >= 2
-                          ? 'bg-[#00C853]/15 text-[#00C853]'
-                          : rrRatio && Number(rrRatio) >= 1
-                          ? 'bg-[#FFB300]/15 text-[#FFB300]'
-                          : 'bg-zinc-800 text-zinc-400'
-                      }`}
-                    >
-                      {rrRatio ? `1 : ${rrRatio}` : 'Set Entry, TP & SL'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Tombol Simpan Perubahan */}
-                <button
-                  type="button"
-                  disabled={savingId === item.id}
-                  onClick={() => handleSaveItem(item)}
-                  className="w-full min-h-[46px] bg-[#252525] hover:bg-[#303030] text-white font-bold text-sm rounded-xl border border-[#3A3A3A] flex items-center justify-center gap-2 active:scale-[0.98]"
-                >
-                  <Save className="w-4 h-4 text-[#00C853]" />
-                  {savingId === item.id ? 'Menyimpan...' : 'SIMPAN PLAN'}
+              </div>
+              <div className="text-right">
+                <div className="text-lg font-bold">{px ? n(px) : '—'}</div>
+                {status && <div className={`text-xs font-semibold ${statusColor}`}>{status}</div>}
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <Num label="Entry" value={it.entry_plan} onChange={(v) => update(it, 'entry_plan', v)} />
+              <Num label="Cut loss" value={it.sl} onChange={(v) => update(it, 'sl', v)} />
+              <Num label="Target" value={it.tp} onChange={(v) => update(it, 'tp', v)} />
+              <Num label="Lot" value={it.lot} onChange={(v) => update(it, 'lot', v)} />
+            </div>
+            <div className="text-xs text-zinc-400">
+              Risiko {formatRupiah(risk)} · potensi {formatRupiah(reward)} · R:R {risk > 0 ? (reward / risk).toFixed(1) : '-'}
+              {pl !== null && (
+                <span className={pl >= 0 ? 'text-[#00C853]' : 'text-[#FF3B30]'}>
+                  {' '}
+                  · P/L sekarang {formatRupiah(pl)} (bersih)
+                </span>
+              )}
+            </div>
+            {it.note && <div className="text-[11px] text-zinc-500">Alasan: {it.note}</div>}
+            {closing === it.id ? (
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  placeholder="Harga jual"
+                  value={exitPrice}
+                  onChange={(e) => setExitPrice(e.target.value)}
+                  className="flex-1 bg-[#0F0F0F] border border-[#2A2A2A] rounded-xl px-3 py-2 text-sm"
+                />
+                <button onClick={() => closeToJournal(it)} className="px-4 rounded-xl bg-[#00C853] text-black text-sm font-bold">
+                  Simpan
                 </button>
-              </article>
-            );
-          })}
-        </section>
-      )}
+                <button onClick={() => setClosing(null)} className="px-3 rounded-xl bg-[#232323] text-sm">
+                  Batal
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setClosing(it.id);
+                    setExitPrice(px ? String(Math.round(px)) : '');
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-xs py-2 rounded-xl bg-[#232323]"
+                >
+                  <BookCheck className="w-4 h-4" /> Sudah jual → Jurnal
+                </button>
+                <button onClick={() => remove(it.id)} className="px-3 rounded-xl bg-[#232323] text-[#FF3B30]">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function Num({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  const [v, setV] = useState(String(value));
+  useEffect(() => setV(String(value)), [value]);
+  return (
+    <label className="block">
+      <span className="text-[10px] text-zinc-500">{label}</span>
+      <input
+        type="number"
+        inputMode="numeric"
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => Number(v) !== value && Number(v) > 0 && onChange(Number(v))}
+        className="w-full bg-[#0F0F0F] border border-[#2A2A2A] rounded-lg px-2 py-1.5 text-sm font-semibold"
+      />
+    </label>
   );
 }
