@@ -51,7 +51,7 @@ Hapus `NEXT_PUBLIC_SUPABASE_ANON_KEY` yang lama (tidak dipakai lagi). Lalu **Red
 ## Batasan yang perlu diketahui
 - Data Yahoo untuk IDX **tertunda ±10 menit** dan tidak resmi; bisa sesekali gagal (rate limit).
 - Tidak ada data broker summary / foreign flow / bid-offer (tidak tersedia gratis).
-- Daftar syariah statis di `data/syariah-list.ts` — cocokkan dengan DES OJK terbaru.
+- Label syariah memakai DES OJK Periode I 2026. Saat DES baru terbit (akhir Mei & November), tempel daftarnya di halaman Atur.
 - Backtest harian untuk day trade bersifat konservatif (jika SL & TP tersentuh di hari yang sama dianggap SL).
 
 ## Pengembangan
