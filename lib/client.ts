@@ -50,17 +50,22 @@ async function handle(res: Response) {
   return json;
 }
 
-let dbStatus: Promise<boolean> | null = null;
-/** Cek sekali apakah DB terkonfigurasi, supaya tidak memanggil endpoint yang pasti gagal. */
+let dbStatus: Promise<{ db: boolean; keyKind?: string; dbConfigured?: boolean }> | null = null;
+/** Cek sekali apakah DB siap, supaya tidak memanggil endpoint yang pasti gagal. */
 async function ensureDb() {
   if (!dbStatus) {
     dbStatus = fetch('/api/status')
       .then((r) => r.json())
-      .then((j) => Boolean(j.db))
-      .catch(() => true);
+      .catch(() => ({ db: true }));
   }
-  if (!(await dbStatus)) {
-    const err = new Error('Database belum dikonfigurasi') as Error & { notConfigured?: boolean };
+  const st = await dbStatus;
+  if (!st.db) {
+    const wrongKey = st.dbConfigured && (st.keyKind === 'anon' || st.keyKind === 'publishable');
+    const err = new Error(
+      wrongKey
+        ? 'Key Supabase salah: SUPABASE_SERVICE_ROLE_KEY berisi key publik (anon). Ganti dengan service_role key di Vercel lalu Redeploy.'
+        : 'Database belum dikonfigurasi. Isi SUPABASE_URL & SUPABASE_SERVICE_ROLE_KEY di Vercel.'
+    ) as Error & { notConfigured?: boolean };
     err.notConfigured = true;
     throw err;
   }

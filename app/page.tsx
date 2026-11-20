@@ -227,7 +227,7 @@ export default function ScreenerPage() {
       });
       setSaved((s) => new Set(s).add(r.ticker));
     } catch (e) {
-      setErrorMsg(e instanceof Error && (e as Error & { notConfigured?: boolean }).notConfigured ? 'Watchlist butuh Supabase. Isi env SUPABASE_URL & SUPABASE_SERVICE_ROLE_KEY.' : `Gagal simpan: ${e instanceof Error ? e.message : ''}`);
+      setErrorMsg(`Gagal simpan: ${e instanceof Error ? e.message : ''}`);
     }
   };
 
