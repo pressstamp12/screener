@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, isDbConfigured } from '@/lib/supabaseServer';
+import { db, dbKeyOk, isDbConfigured, WRONG_KEY_MSG } from '@/lib/supabaseServer';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,8 +27,17 @@ function pick(row: Record<string, unknown>, cols: string[]) {
 
 function guard(table: string) {
   if (!isDbConfigured) return NextResponse.json({ error: 'Database belum dikonfigurasi', notConfigured: true }, { status: 503 });
+  if (!dbKeyOk) return NextResponse.json({ error: WRONG_KEY_MSG, wrongKey: true }, { status: 503 });
   if (!TABLES[table]) return NextResponse.json({ error: 'Tabel tidak dikenal' }, { status: 404 });
   return null;
+}
+
+const GRANT_MSG =
+  'Izin tabel belum diberikan ke service_role. Jalankan ulang supabase/schema.sql (bagian GRANT di paling bawah) di Supabase SQL Editor.';
+
+function dbError(message: string) {
+  const msg = /row-level security/i.test(message) ? WRONG_KEY_MSG : /permission denied/i.test(message) ? GRANT_MSG : message;
+  return NextResponse.json({ error: msg }, { status: 500 });
 }
 
 export async function GET(req: NextRequest, { params }: { params: { table: string } }) {
@@ -43,7 +52,7 @@ export async function GET(req: NextRequest, { params }: { params: { table: strin
   const since = sp.get('since');
   if (since && params.table === 'screening_results') q = q.gte('date', since);
   const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbError(error.message);
   return NextResponse.json({ data });
 }
 
@@ -57,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: { table: stri
   if (params.table === 'app_settings') rows.forEach((r: Record<string, unknown>) => (r.updated_at = new Date().toISOString()));
   const q = cfg.conflict ? db().from(params.table).upsert(rows, { onConflict: cfg.conflict }) : db().from(params.table).insert(rows);
   const { data, error } = await q.select();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbError(error.message);
   return NextResponse.json({ data });
 }
 
@@ -68,7 +77,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { table: str
   const id = Number(body?.id);
   if (!id) return NextResponse.json({ error: 'id wajib' }, { status: 400 });
   const { data, error } = await db().from(params.table).update(pick(body, TABLES[params.table].cols)).eq('id', id).select();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbError(error.message);
   return NextResponse.json({ data });
 }
 
@@ -78,6 +87,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { table: st
   const id = Number(req.nextUrl.searchParams.get('id'));
   if (!id) return NextResponse.json({ error: 'id wajib' }, { status: 400 });
   const { error } = await db().from(params.table).delete().eq('id', id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbError(error.message);
   return NextResponse.json({ ok: true });
 }

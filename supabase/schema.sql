@@ -100,3 +100,14 @@ ALTER TABLE public.watchlist ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_news ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
+-- IZIN (GRANT). Project Supabase baru tidak otomatis memberi izin tabel
+-- ke role API; tanpa ini muncul "permission denied for table ...".
+-- ============================================================
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.screening_results, public.watchlist, public.trades, public.stock_news, public.app_settings TO service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
+
+-- Key publik (anon/authenticated) tidak butuh akses sama sekali
+REVOKE ALL ON public.screening_results, public.watchlist, public.trades, public.stock_news, public.app_settings FROM anon, authenticated;

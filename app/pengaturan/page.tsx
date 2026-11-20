@@ -9,7 +9,7 @@ export default function PengaturanPage() {
   const [s, setS] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [universeText, setUniverseText] = useState('');
   const [syariahText, setSyariahText] = useState('');
-  const [status, setStatus] = useState<{ db: boolean; auth: boolean } | null>(null);
+  const [status, setStatus] = useState<{ db: boolean; dbConfigured?: boolean; keyKind?: string; auth: boolean } | null>(null);
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
@@ -68,7 +68,15 @@ export default function PengaturanPage() {
       {status && (
         <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-2 text-sm">
           <StatusRow ok={status.auth} okText="Login password aktif" badText="Login TIDAK aktif — isi APP_PASSWORD di Vercel" />
-          <StatusRow ok={status.db} okText="Database terhubung (server-side)" badText="Database belum diisi — watchlist & jurnal tidak tersimpan" />
+          <StatusRow
+            ok={status.db}
+            okText="Database terhubung (server-side)"
+            badText={
+              status.dbConfigured && (status.keyKind === 'anon' || status.keyKind === 'publishable')
+                ? 'Key Supabase salah: yang diisi key publik (anon). Ganti SUPABASE_SERVICE_ROLE_KEY dengan service_role key, lalu Redeploy.'
+                : 'Database belum diisi — watchlist & jurnal tidak tersimpan'
+            }
+          />
         </div>
       )}
 
