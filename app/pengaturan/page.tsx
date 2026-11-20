@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { CheckCircle2, LogOut, RotateCcw, XCircle } from 'lucide-react';
-import { DEFAULT_WATCHLIST } from '@/data/syariah-list';
+import { DEFAULT_WATCHLIST, SYARIAH_SOURCE, SYARIAH_TICKERS } from '@/data/syariah-list';
 import { AppSettings, DEFAULT_APP_SETTINGS, loadSettings, saveSettings } from '@/lib/client';
 
 export default function PengaturanPage() {
   const [s, setS] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [universeText, setUniverseText] = useState('');
+  const [syariahText, setSyariahText] = useState('');
   const [status, setStatus] = useState<{ db: boolean; auth: boolean } | null>(null);
   const [msg, setMsg] = useState('');
 
@@ -15,6 +16,7 @@ export default function PengaturanPage() {
     const cur = loadSettings();
     setS(cur);
     setUniverseText(cur.universe.join(', '));
+    setSyariahText((cur.syariahList || []).join(' '));
     fetch('/api/status')
       .then((r) => r.json())
       .then(setStatus)
@@ -36,7 +38,14 @@ export default function PengaturanPage() {
           .filter((t) => /^[A-Z]{4}$/.test(t))
       )
     );
-    const next = { ...s, universe: universe.length ? universe : DEFAULT_WATCHLIST };
+    // Ambil hanya token 4 huruf KAPITAL (nama perusahaan di PDF ditulis huruf campuran)
+    const STOP = new Set(['KODE', 'NAMA', 'EFEK', 'DAN']);
+    const syariahList = Array.from(new Set((syariahText.match(/\b[A-Z]{4}\b/g) || []).filter((t) => !STOP.has(t))));
+    if (syariahList.length > 0 && syariahList.length < 100) {
+      setMsg(`Daftar syariah hanya berisi ${syariahList.length} kode — sepertinya belum lengkap (DES berisi 600+ saham). Belum disimpan.`);
+      return;
+    }
+    const next = { ...s, universe: universe.length ? universe : DEFAULT_WATCHLIST, syariahList };
     setS(next);
     setUniverseText(next.universe.join(', '));
     await saveSettings(next);
@@ -119,6 +128,17 @@ export default function PengaturanPage() {
         </div>
       </Section>
 
+      <Section title="Daftar saham syariah">
+        <p className="text-xs text-zinc-400">
+          Bawaan: <b>{SYARIAH_SOURCE}</b>, {SYARIAH_TICKERS.length} saham.{' '}
+          {s.syariahList?.length ? <span className="text-[#FFB300]">Sedang memakai daftar Anda sendiri ({s.syariahList.length} saham).</span> : 'Sedang memakai daftar bawaan.'}
+        </p>
+        <p className="text-xs text-zinc-500">
+          Saat OJK menerbitkan DES baru (akhir Mei & akhir November), tempel semua kode sahamnya di sini. Boleh tempel langsung dari tabel PDF/Excel OJK — kode 4 huruf akan diambil otomatis. Kosongkan untuk kembali ke daftar bawaan.
+        </p>
+        <textarea className="inp h-28 font-mono text-xs" placeholder="Kosong = pakai daftar bawaan" value={syariahText} onChange={(e) => setSyariahText(e.target.value)} />
+      </Section>
+
       <button onClick={save} className="w-full bg-[#00C853] text-black font-extrabold rounded-2xl py-3.5">
         SIMPAN PENGATURAN
       </button>
@@ -129,7 +149,6 @@ export default function PengaturanPage() {
           <LogOut className="w-4 h-4" /> Keluar
         </button>
       )}
-      <p className="text-[11px] text-zinc-600">Daftar syariah bersifat statis (data/syariah-list.ts) — cocokkan dengan DES OJK terbaru.</p>
     </div>
   );
 }

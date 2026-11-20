@@ -1,6 +1,6 @@
 'use client';
 /** Helper sisi browser: ambil data, akses DB lewat server, simpan pengaturan. */
-import { DEFAULT_WATCHLIST } from '@/data/syariah-list';
+import { DEFAULT_WATCHLIST, setSyariahOverride } from '@/data/syariah-list';
 import { Calibration, DEFAULT_SETTINGS, ScreenSettings, Strategy } from './scoring';
 import type { StockSeries } from './types';
 
@@ -8,6 +8,7 @@ export interface AppSettings {
   screen: ScreenSettings;
   universe: string[];
   autoRefreshMin: number; // 0 = mati
+  syariahList?: string[]; // kosong = pakai DES bawaan
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -130,6 +131,7 @@ export async function fetchSeries(tickers: string[], opts: FetchSeriesOptions = 
 
 export function loadSettings(): AppSettings {
   const s = lsGet<Partial<AppSettings>>(LS_SETTINGS);
+  setSyariahOverride(s?.syariahList);
   return {
     ...DEFAULT_APP_SETTINGS,
     ...s,
@@ -140,6 +142,7 @@ export function loadSettings(): AppSettings {
 
 export async function saveSettings(s: AppSettings) {
   lsSet(LS_SETTINGS, s);
+  setSyariahOverride(s.syariahList);
   try {
     await api.save('app_settings', { key: 'settings', value: s });
   } catch {
