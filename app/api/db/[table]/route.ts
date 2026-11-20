@@ -32,8 +32,11 @@ function guard(table: string) {
   return null;
 }
 
+const GRANT_MSG =
+  'Izin tabel belum diberikan ke service_role. Jalankan ulang supabase/schema.sql (bagian GRANT di paling bawah) di Supabase SQL Editor.';
+
 function dbError(message: string) {
-  const msg = /row-level security|permission denied/i.test(message) ? WRONG_KEY_MSG : message;
+  const msg = /row-level security/i.test(message) ? WRONG_KEY_MSG : /permission denied/i.test(message) ? GRANT_MSG : message;
   return NextResponse.json({ error: msg }, { status: 500 });
 }
 
