@@ -1,424 +1,208 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  BookOpen,
-  PlusCircle,
-  Trash2,
-  AlertCircle,
-  CheckCircle2,
-} from 'lucide-react';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
-import {
-  formatDateIndo,
-  formatPrice,
-  formatRupiah,
-  getTodayISO,
-} from '@/lib/format';
-import { TradeItem } from '@/lib/types';
+import { Plus, Trash2 } from 'lucide-react';
+import { api, loadSettings } from '@/lib/client';
+import { DEFAULT_FEES, FeeConfig, netPnl } from '@/lib/idx';
+import { formatDateIndo, formatRupiah, getTodayISO } from '@/lib/format';
+import type { TradeItem } from '@/lib/types';
+
+const EMPTY = { ticker: '', strategy: 'DAYTRADE', entry: '', exit: '', sl: '', lot: '', date: getTodayISO(), note: '' };
 
 export default function JurnalPage() {
   const [trades, setTrades] = useState<TradeItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [submitting, setSubmitting] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string>('');
-  const [statusMsg, setStatusMsg] = useState<string>('');
-
-  // Form state
-  const [ticker, setTicker] = useState<string>('');
-  const [entryPrice, setEntryPrice] = useState<string>('');
-  const [exitPrice, setExitPrice] = useState<string>('');
-  const [lot, setLot] = useState<string>('1');
-  const [note, setNote] = useState<string>('');
-  const [tradeDate, setTradeDate] = useState<string>(getTodayISO());
-
-  const loadTrades = async () => {
-    if (!isSupabaseConfigured) {
-      setLoading(false);
-      setErrorMsg('ENV Supabase belum diset. Cek README untuk panduan setup.');
-      return;
-    }
-
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('trades')
-      .select('*')
-      .order('trade_date', { ascending: false })
-      .order('id', { ascending: false });
-
-    if (error) {
-      setErrorMsg(`Gagal ambil riwayat trade: ${error.message}`);
-    } else {
-      setTrades((data || []) as TradeItem[]);
-    }
-    setLoading(false);
-  };
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [form, setForm] = useState(EMPTY);
+  const [showForm, setShowForm] = useState(false);
+  const [fees, setFees] = useState<FeeConfig>(DEFAULT_FEES);
+  const [filter, setFilter] = useState<'ALL' | 'DAYTRADE' | 'REBOUND'>('ALL');
 
   useEffect(() => {
-    loadTrades();
+    setFees(loadSettings().screen.fees);
+    api
+      .get<TradeItem>('trades')
+      .then(setTrades)
+      .catch((e) => setErr(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
-  // Preview profit/loss otomatis saat mengetik
-  const previewPL = useMemo(() => {
-    const entry = Number(entryPrice) || 0;
-    const exit = Number(exitPrice) || 0;
-    const lotNum = Number(lot) || 0;
-    if (entry <= 0 || exit <= 0 || lotNum <= 0) return 0;
-    return (exit - entry) * lotNum * 100;
-  }, [entryPrice, exitPrice, lot]);
+  const list = useMemo(() => trades.filter((t) => filter === 'ALL' || t.strategy === filter), [trades, filter]);
 
-  // Statistik keseluruhan
   const stats = useMemo(() => {
-    const total = trades.length;
-    const wins = trades.filter((t) => Number(t.profit_loss) > 0).length;
-    const winRate = total > 0 ? (wins / total) * 100 : 0;
-    const totalPL = trades.reduce((acc, t) => acc + Number(t.profit_loss), 0);
-    return { total, wins, winRate, totalPL };
-  }, [trades]);
+    const nT = list.length;
+    const wins = list.filter((t) => Number(t.profit_loss) > 0);
+    const total = list.reduce((a, t) => a + Number(t.profit_loss), 0);
+    const gross = wins.reduce((a, t) => a + Number(t.profit_loss), 0);
+    const loss = -list.filter((t) => Number(t.profit_loss) <= 0).reduce((a, t) => a + Number(t.profit_loss), 0);
+    const rs = list.map((t) => t.r_multiple).filter((r): r is number => r !== null && r !== undefined).map(Number);
+    return {
+      nT,
+      winRate: nT ? wins.length / nT : 0,
+      total,
+      pf: loss > 0 ? gross / loss : gross > 0 ? Infinity : 0,
+      avgR: rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null,
+      avgWin: wins.length ? gross / wins.length : 0,
+      avgLoss: nT - wins.length ? loss / (nT - wins.length) : 0,
+    };
+  }, [list]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isSupabaseConfigured) {
-      setErrorMsg('Isi ENV Supabase dulu ya biar bisa simpan jurnal.');
+  const submit = async () => {
+    const entry = Number(form.entry);
+    const exit = Number(form.exit);
+    const lot = Number(form.lot);
+    const sl = Number(form.sl) || null;
+    if (!form.ticker || !entry || !exit || !lot) {
+      setErr('Isi ticker, entry, exit, dan lot');
       return;
     }
-
-    const cleanTicker = ticker.replace(/\.JK$/i, '').trim().toUpperCase();
-    const entry = Number(entryPrice);
-    const exit = Number(exitPrice);
-    const lotNum = Number(lot);
-
-    if (!cleanTicker || entry <= 0 || exit <= 0 || lotNum <= 0) {
-      setErrorMsg('Lengkapi Ticker, Harga Entry, Harga Exit, dan Lot dulu.');
-      return;
-    }
-
-    setSubmitting(true);
-    setErrorMsg('');
-    setStatusMsg('');
-
-    const profitLoss = (exit - entry) * lotNum * 100;
-
-    const { data, error } = await supabase
-      .from('trades')
-      .insert({
-        ticker: cleanTicker,
+    const pl = netPnl(entry, exit, lot, fees);
+    const gross = (exit - entry) * lot * 100;
+    try {
+      const [row] = await api.save<TradeItem>('trades', {
+        ticker: form.ticker.toUpperCase(),
+        strategy: form.strategy,
         entry_price: entry,
         exit_price: exit,
-        lot: lotNum,
-        profit_loss: profitLoss,
-        note: note.trim(),
-        trade_date: tradeDate || getTodayISO(),
-      })
-      .select()
-      .single();
-
-    if (error) {
-      setErrorMsg(`Gagal simpan trade: ${error.message}`);
-    } else if (data) {
-      setTrades((prev) => [data as TradeItem, ...prev]);
-      setTicker('');
-      setEntryPrice('');
-      setExitPrice('');
-      setLot('1');
-      setNote('');
-      setStatusMsg(`Trade ${cleanTicker} berhasil dicatat di jurnal!`);
+        sl,
+        lot,
+        fees: Math.round(gross - pl),
+        profit_loss: Math.round(pl),
+        r_multiple: sl && entry > sl ? Number((pl / ((entry - sl) * lot * 100)).toFixed(2)) : null,
+        note: form.note,
+        trade_date: form.date,
+      });
+      setTrades((t) => [row, ...t]);
+      setForm(EMPTY);
+      setShowForm(false);
+      setErr('');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Gagal simpan');
     }
-
-    setSubmitting(false);
   };
 
-  const handleDeleteTrade = async (id: number) => {
-    const { error } = await supabase.from('trades').delete().eq('id', id);
-    if (error) {
-      setErrorMsg(`Gagal hapus data: ${error.message}`);
-      return;
-    }
-    setTrades((prev) => prev.filter((t) => t.id !== id));
+  const remove = async (id: number) => {
+    setTrades((t) => t.filter((x) => x.id !== id));
+    await api.remove('trades', id).catch(() => setErr('Gagal menghapus'));
   };
+
+  const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <header>
-        <h1 className="text-2xl font-black tracking-tight text-white">
-          Jurnal & Riwayat
-        </h1>
-        <p className="text-xs text-zinc-400 mt-0.5">
-          Catat tiap eksekusi biar makin disiplin & evaluasi gampang
-        </p>
+    <div className="space-y-4">
+      <header className="flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight">Jurnal</h1>
+          <p className="text-sm text-zinc-400">Evaluasi hasil nyata, setelah biaya</p>
+        </div>
+        <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 text-sm px-3 py-2 rounded-xl bg-[#00C853] text-black font-bold">
+          <Plus className="w-4 h-4" /> Catat
+        </button>
       </header>
 
-      {/* Statistik Ringkas */}
-      <section className="grid grid-cols-3 gap-2.5">
-        <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-3 text-center">
-          <span className="text-[11px] text-zinc-400 block">Total Trade</span>
-          <span className="text-2xl font-black text-white mt-0.5 block">
-            {stats.total}
-          </span>
-        </div>
+      <div className="flex gap-1.5">
+        {(['ALL', 'DAYTRADE', 'REBOUND'] as const).map((f) => (
+          <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${filter === f ? 'bg-[#00C853] text-black' : 'bg-[#1A1A1A] text-zinc-300'}`}>
+            {f === 'ALL' ? 'Semua' : f === 'DAYTRADE' ? 'Day trade' : 'Rebound'}
+          </button>
+        ))}
+      </div>
 
-        <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-3 text-center">
-          <span className="text-[11px] text-zinc-400 block">Win Rate</span>
-          <span
-            className={`text-2xl font-black mt-0.5 block ${
-              stats.winRate >= 50 ? 'text-[#00C853]' : 'text-[#FFB300]'
-            }`}
-          >
-            {stats.winRate.toFixed(0)}%
-          </span>
-        </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Stat label="Trade" value={String(stats.nT)} />
+        <Stat label="Win rate" value={`${Math.round(stats.winRate * 100)}%`} />
+        <Stat label="Profit factor" value={Number.isFinite(stats.pf) ? stats.pf.toFixed(2) : '∞'} tone={stats.pf >= 1 ? 'g' : 'r'} />
+        <Stat label="Total P/L" value={formatRupiah(stats.total)} tone={stats.total >= 0 ? 'g' : 'r'} wide />
+        <Stat label="Rata-rata R" value={stats.avgR === null ? '-' : `${stats.avgR >= 0 ? '+' : ''}${stats.avgR.toFixed(2)}`} tone={(stats.avgR ?? 0) >= 0 ? 'g' : 'r'} />
+      </div>
+      {stats.nT > 0 && (
+        <p className="text-xs text-zinc-500">
+          Rata-rata untung {formatRupiah(stats.avgWin)} vs rata-rata rugi {formatRupiah(stats.avgLoss)}. Bandingkan win rate di sini dengan angka Backtest — kalau jauh lebih rendah, cek disiplin entry/cut loss.
+        </p>
+      )}
 
-        <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-3 text-center">
-          <span className="text-[11px] text-zinc-400 block">Total P/L</span>
-          <span
-            className={`text-sm font-black mt-2 block leading-tight ${
-              stats.totalPL >= 0 ? 'text-[#00C853]' : 'text-[#FF3B30]'
-            }`}
-          >
-            {stats.totalPL >= 0 ? '+' : ''}
-            {formatRupiah(stats.totalPL)}
-          </span>
-        </div>
-      </section>
-
-      {/* Form Input Trade */}
-      <form
-        onSubmit={handleSubmit}
-        className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-3.5"
-      >
-        <div className="flex items-center gap-2 text-sm font-bold text-white">
-          <PlusCircle className="w-4 h-4 text-[#00C853]" />
-          <span>Catat Hasil Trade</span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2.5">
-          <div>
-            <label className="text-[11px] text-zinc-400 block mb-1">
-              Ticker
-            </label>
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              placeholder="ADRO"
-              maxLength={6}
-              required
-              className="w-full bg-[#121212] border border-[#333] rounded-xl px-3 py-2.5 text-sm font-extrabold text-white uppercase focus:outline-none focus:border-[#00C853]"
-            />
-          </div>
-
-          <div>
-            <label className="text-[11px] text-zinc-400 block mb-1">
-              Tanggal
-            </label>
-            <input
-              type="date"
-              value={tradeDate}
-              onChange={(e) => setTradeDate(e.target.value)}
-              className="w-full bg-[#121212] border border-[#333] rounded-xl px-3 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <label className="text-[11px] text-zinc-400 block mb-1">
-              Entry (Rp)
-            </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={entryPrice}
-              onChange={(e) => setEntryPrice(e.target.value)}
-              placeholder="2500"
-              required
-              className="w-full bg-[#121212] border border-[#333] rounded-xl px-2.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-            />
-          </div>
-
-          <div>
-            <label className="text-[11px] text-zinc-400 block mb-1">
-              Exit (Rp)
-            </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={exitPrice}
-              onChange={(e) => setExitPrice(e.target.value)}
-              placeholder="2700"
-              required
-              className="w-full bg-[#121212] border border-[#333] rounded-xl px-2.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-            />
-          </div>
-
-          <div>
-            <label className="text-[11px] text-zinc-400 block mb-1">Lot</label>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={lot}
-              onChange={(e) => setLot(e.target.value)}
-              placeholder="2"
-              min={1}
-              required
-              className="w-full bg-[#121212] border border-[#333] rounded-xl px-2.5 py-2.5 text-sm font-bold text-white focus:outline-none focus:border-[#00C853]"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="text-[11px] text-zinc-400 block mb-1">
-            Alasan Masuk / Catatan
-          </label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Mantul support 20H + RSI 34 + volume naik"
-            className="w-full bg-[#121212] border border-[#333] rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#00C853]"
-          />
-        </div>
-
-        {/* Preview Hasil Untung / Rugi */}
-        {entryPrice && exitPrice && (
-          <div className="flex items-center justify-between bg-[#121212] border border-[#252525] rounded-xl px-3.5 py-2.5">
-            <span className="text-xs text-zinc-400">Hasil Estimasi</span>
-            <span
-              className={`text-sm font-black ${
-                previewPL >= 0 ? 'text-[#00C853]' : 'text-[#FF3B30]'
-              }`}
-            >
-              {previewPL >= 0 ? 'UNTUNG ' : 'RUGI '}
-              {previewPL >= 0 ? '+' : ''}
-              {formatRupiah(previewPL)}
-            </span>
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full min-h-[52px] bg-[#00C853] hover:bg-[#00e05d] disabled:opacity-60 text-black font-black text-base rounded-2xl transition-all active:scale-[0.98]"
-        >
-          {submitting ? 'Menyimpan...' : 'SIMPAN KE JURNAL'}
-        </button>
-      </form>
-
-      {/* Feedback */}
-      {errorMsg && (
-        <div className="bg-[#FF3B30]/15 border border-[#FF3B30]/40 text-[#FF6B63] rounded-2xl p-3.5 text-sm flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-          <span>{errorMsg}</span>
+      {showForm && (
+        <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 grid grid-cols-2 gap-2">
+          <Field label="Ticker">
+            <input value={form.ticker} onChange={set('ticker')} className="inp uppercase" />
+          </Field>
+          <Field label="Strategi">
+            <select value={form.strategy} onChange={set('strategy')} className="inp">
+              <option value="DAYTRADE">Day trade</option>
+              <option value="REBOUND">Rebound</option>
+              <option value="LAIN">Lainnya</option>
+            </select>
+          </Field>
+          <Field label="Harga beli">
+            <input type="number" inputMode="numeric" value={form.entry} onChange={set('entry')} className="inp" />
+          </Field>
+          <Field label="Harga jual">
+            <input type="number" inputMode="numeric" value={form.exit} onChange={set('exit')} className="inp" />
+          </Field>
+          <Field label="Cut loss rencana">
+            <input type="number" inputMode="numeric" value={form.sl} onChange={set('sl')} className="inp" />
+          </Field>
+          <Field label="Lot">
+            <input type="number" inputMode="numeric" value={form.lot} onChange={set('lot')} className="inp" />
+          </Field>
+          <Field label="Tanggal">
+            <input type="date" value={form.date} onChange={set('date')} className="inp" />
+          </Field>
+          <Field label="Catatan">
+            <input value={form.note} onChange={set('note')} className="inp" />
+          </Field>
+          <button onClick={submit} className="col-span-2 mt-1 bg-[#00C853] text-black font-bold rounded-xl py-2.5">
+            Simpan trade
+          </button>
         </div>
       )}
 
-      {statusMsg && !errorMsg && (
-        <div className="bg-[#00C853]/10 border border-[#00C853]/30 text-[#00C853] rounded-2xl p-3 text-xs font-semibold flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
-          <span>{statusMsg}</span>
-        </div>
-      )}
+      {err && <div className="text-sm text-[#FF3B30]">{err}</div>}
+      {loading && <div className="text-sm text-zinc-500">Memuat…</div>}
 
-      {/* Daftar Riwayat Trade */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-bold text-zinc-300">Riwayat Trade</h2>
-
-        {loading ? (
-          <p className="text-center py-6 text-sm text-zinc-400">
-            Memuat riwayat...
-          </p>
-        ) : trades.length === 0 ? (
-          <div className="bg-[#1A1A1A] border border-dashed border-[#333] rounded-2xl p-8 text-center space-y-2">
-            <BookOpen className="w-10 h-10 text-zinc-600 mx-auto" />
-            <p className="font-bold text-zinc-200">Belum ada catatan trade</p>
-            <p className="text-xs text-zinc-400">
-              Mulai catat hasil buy & sell kamu di form atas.
-            </p>
-          </div>
-        ) : (
-          trades.map((t) => {
-            const isWin = Number(t.profit_loss) >= 0;
-            const pct =
-              Number(t.entry_price) > 0
-                ? ((Number(t.exit_price) - Number(t.entry_price)) /
-                    Number(t.entry_price)) *
-                  100
-                : 0;
-
-            return (
-              <article
-                key={t.id}
-                className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 space-y-2.5"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl font-black text-white">
-                        {t.ticker}
-                      </span>
-                      <span
-                        className={`text-[11px] font-extrabold px-2 py-0.5 rounded-md ${
-                          isWin
-                            ? 'bg-[#00C853]/15 text-[#00C853]'
-                            : 'bg-[#FF3B30]/15 text-[#FF3B30]'
-                        }`}
-                      >
-                        {isWin ? 'UNTUNG' : 'RUGI'}
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-zinc-400">
-                      {formatDateIndo(t.trade_date)} · {t.lot} Lot
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="text-right">
-                      <span
-                        className={`text-base font-black block ${
-                          isWin ? 'text-[#00C853]' : 'text-[#FF3B30]'
-                        }`}
-                      >
-                        {isWin ? '+' : ''}
-                        {formatRupiah(Number(t.profit_loss))}
-                      </span>
-                      <span className="text-[11px] text-zinc-400">
-                        {pct >= 0 ? '+' : ''}
-                        {pct.toFixed(1)}%
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTrade(t.id)}
-                      aria-label="Hapus trade"
-                      className="p-2 rounded-xl bg-[#121212] text-zinc-500 hover:text-[#FF3B30]"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+      <div className="space-y-2">
+        {list.map((t) => {
+          const pl = Number(t.profit_loss);
+          return (
+            <div key={t.id} className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-3 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-bold">
+                  {t.ticker} <span className="text-xs font-normal text-zinc-500">{formatDateIndo(t.trade_date)}</span>
                 </div>
-
-                <div className="flex items-center gap-3 text-xs text-zinc-300 bg-[#121212] rounded-xl px-3 py-2">
-                  <span>
-                    Entry: <strong>{formatPrice(Number(t.entry_price))}</strong>
-                  </span>
-                  <span className="text-zinc-600">→</span>
-                  <span>
-                    Exit: <strong>{formatPrice(Number(t.exit_price))}</strong>
-                  </span>
+                <div className="text-xs text-zinc-400">
+                  {Math.round(Number(t.entry_price)).toLocaleString('id-ID')} → {Math.round(Number(t.exit_price)).toLocaleString('id-ID')} · {t.lot} lot
+                  {t.r_multiple != null && ` · ${Number(t.r_multiple) >= 0 ? '+' : ''}${Number(t.r_multiple).toFixed(2)}R`}
                 </div>
-
-                {t.note && (
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    &ldquo;{t.note}&rdquo;
-                  </p>
-                )}
-              </article>
-            );
-          })
-        )}
-      </section>
+                {t.note && <div className="text-[11px] text-zinc-500 truncate">{t.note}</div>}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`font-bold text-sm ${pl >= 0 ? 'text-[#00C853]' : 'text-[#FF3B30]'}`}>{formatRupiah(pl)}</span>
+                <button onClick={() => remove(t.id)} className="text-zinc-500">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function Stat({ label, value, tone, wide }: { label: string; value: string; tone?: 'g' | 'r'; wide?: boolean }) {
+  return (
+    <div className={`bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-2.5 ${wide ? 'col-span-2' : ''}`}>
+      <div className="text-[11px] text-zinc-500">{label}</div>
+      <div className={`font-black ${tone === 'g' ? 'text-[#00C853]' : tone === 'r' ? 'text-[#FF3B30]' : ''}`}>{value}</div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-[11px] text-zinc-500">{label}</span>
+      {children}
+    </label>
   );
 }

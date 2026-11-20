@@ -1,7 +1,7 @@
 {
-  "name": "Mode D Screener - Saham Rebound IDX",
-  "short_name": "Mode D",
-  "description": "Aplikasi PWA screening saham rebound harian Mode D untuk trader modal kecil di Indonesia.",
+  "name": "Screener IDX - Day Trade & Rebound",
+  "short_name": "Screener",
+  "description": "Screener saham IDX multi-faktor untuk day trade dan rebound.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

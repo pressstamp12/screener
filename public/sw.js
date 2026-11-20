@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mode-d-screener-v3';
+const CACHE_NAME = 'screener-v4';
 const APP_SHELL = [
   '/',
   '/watchlist',

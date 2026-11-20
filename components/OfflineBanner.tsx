@@ -11,7 +11,7 @@ export default function OfflineBanner() {
   useEffect(() => {
     const syncStatus = () => {
       setIsOffline(!navigator.onLine);
-      const saved = localStorage.getItem('modeD_last_scan_date');
+      const saved = localStorage.getItem('sc2_last_scan');
       setLastDate(saved ? formatDateIndo(saved) : 'belum ada scan');
     };
 
